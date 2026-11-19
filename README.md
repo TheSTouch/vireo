@@ -1,48 +1,68 @@
-# Zed
+# VS Core
 
-[![Zed](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/zed-industries/zed/main/assets/badge/v0.json)](https://zed.dev)
-[![CI](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml/badge.svg)](https://github.com/zed-industries/zed/actions/workflows/run_tests.yml)
+VS Core is a fork of [Zed](https://github.com/zed-industries/zed). The goal is a full replacement for Visual Studio Code: the features and workflow people rely on in VS Code, built on Zed's native Rust core. No Electron, no Chromium, and a fraction of the memory.
 
-Welcome to Zed, a high-performance, multiplayer code editor from the creators of [Atom](https://github.com/atom/atom) and [Tree-sitter](https://github.com/tree-sitter/tree-sitter).
+> **Status: early.** For now the code is Zed plus the groundwork described below. Expect breaking changes.
 
----
+VS Core is an independent project. It is not affiliated with or endorsed by Zed Industries, Microsoft or Anthropic.
 
-### Installation
+## Why
 
-On macOS, Linux, and Windows you can [download Zed directly](https://zed.dev/download) or install Zed via your local package manager ([macOS](https://zed.dev/docs/installation#macos)/[Linux](https://zed.dev/docs/linux#installing-via-a-package-manager)/[Windows](https://zed.dev/docs/windows#package-managers)).
+VS Code runs every window as a Chromium renderer plus a Node extension host, plus its own copy of every language server. With a few windows open, that easily reaches several gigabytes. Zed already proves that a native, GPU-rendered editor can be fast and light. What it lacks, for many VS Code users, is the breadth: panels, explorers, tooling and the extension ecosystem. VS Core aims to close that gap.
 
-Other platforms are not yet available:
+## What we decided
 
-- Web ([tracking discussion](https://github.com/zed-industries/zed/discussions/26195))
+- **Built on Zed, kept close to upstream.** VS Core regularly merges upstream Zed. Our work lives in new crates wherever possible, so merges stay cheap.
+- **Our own addon system. VS Code extensions will not run.** We are not building a compatibility layer for the VS Code extension API. Instead, VS Core extends Zed's WebAssembly extension system with a **UI API**, so addons can add:
+  - commands
+  - panels and tree views
+  - status bar items
+  - editor decorations
+  - their own views
 
-### Developing Zed
+  Today Zed extensions can only provide language servers, debug adapters, slash commands and MCP servers.
+- **VS Code features come back as addons.** Each missing feature becomes its own addon on top of the UI API. Planned addons include:
+  - a test explorer
+  - Jupyter notebooks
+  - a .NET solution explorer
+  - Docker and container panels
+  - file and folder compare
+  - i18n tooling
+- **A first-class Claude Code integration.** VS Core includes a Claude Code panel that matches the feature set and layout of the official Claude Code extension for VS Code. It covers:
+  - side panel and editor tabs
+  - sessions
+  - @-mentions
+  - inline diff review with accept and reject per change
+  - permission modes
+  - the IDE tools Claude uses to read your selection, diagnostics and open files
 
-- [Building Zed for macOS](./docs/src/development/macos.md)
-- [Building Zed for Linux](./docs/src/development/linux.md)
-- [Building Zed for Windows](./docs/src/development/windows.md)
+  It is our own implementation. No code or assets come from the official extension.
 
-### Contributing
+## Roadmap
 
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for ways you can contribute to Zed.
+1. UI API for addons: the foundation everything else builds on.
+2. Claude Code panel, at feature parity with the VS Code extension.
+3. Feature addons, one VS Code capability at a time.
+4. VS Core branding, builds and releases.
 
-Also... we're hiring! Check out our [jobs](https://zed.dev/jobs) page for open roles.
+## Building
 
-### Licensing
+VS Core builds exactly like Zed:
 
-Zed source code is licensed primarily under GPL-3.0-or-later, with Apache-2.0 components where marked.
+- [Building for macOS](./docs/src/development/macos.md)
+- [Building for Linux](./docs/src/development/linux.md)
+- [Building for Windows](./docs/src/development/windows.md)
 
-License information for third party dependencies must be correctly provided for CI to pass.
+## Staying in sync with Zed
 
-We use [`cargo-about`](https://github.com/EmbarkStudios/cargo-about) to automatically comply with open source licenses. If CI is failing, check the following:
+```sh
+git remote add upstream https://github.com/zed-industries/zed.git
+git fetch upstream
+git merge upstream/main
+```
 
-- Is it showing a `no license specified` error for a crate you've created? If so, add `publish = false` under `[package]` in your crate's Cargo.toml.
-- Is the error `failed to satisfy license requirements` for a dependency? If so, first determine what license the project has and whether this system is sufficient to comply with this license's requirements. If you're unsure, ask a lawyer. Once you've verified that this system is acceptable add the license's SPDX identifier to the `accepted` array in `script/licenses/zed-licenses.toml`.
-- Is `cargo-about` unable to find the license for a dependency? If so, add a clarification field at the end of `script/licenses/zed-licenses.toml`, as specified in the [cargo-about book](https://embarkstudios.github.io/cargo-about/cli/generate/config.html#crate-configuration).
+## Licensing
 
-## Sponsorship
+VS Core inherits Zed's licensing: GPL-3.0-or-later, with Apache-2.0 components where marked (including the GPUI framework). See the `LICENSE-*` files. Zed is developed by Zed Industries, Inc.
 
-Zed is developed by **Zed Industries, Inc.**, a for-profit company.
-
-If you’d like to financially support the project, you can do so via GitHub Sponsors.
-Sponsorships go directly to Zed Industries and are used as general company revenue.
-There are no perks or entitlements associated with sponsorship.
+License information for third party dependencies is checked with [`cargo-about`](https://github.com/EmbarkStudios/cargo-about); see `script/licenses/zed-licenses.toml`.

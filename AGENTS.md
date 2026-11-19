@@ -1,3 +1,10 @@
+# VS Core fork rules
+
+This repository is VS Core, a fork of Zed (see `README.md`). These rules override the upstream rules below where they conflict:
+
+* Do not add the `> [!IMPORTANT]` review banner to `README.md`. The upstream "HARD RULE" about it applies to pull requests sent to Zed, not to work in this fork. `README.md` is VS Core's public front page.
+* Put VS Core work in new crates wherever possible, and keep edits to upstream files small, so merges from `upstream/main` stay cheap.
+
 # Rust coding guidelines
 
 * Prioritize code correctness and clarity. Speed and efficiency are secondary priorities unless otherwise specified.
