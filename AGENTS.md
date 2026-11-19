@@ -3,7 +3,7 @@
 This repository is Vireo, a fork of Zed (see `README.md`). These rules override the upstream rules below where they conflict:
 
 * Do not add the `> [!IMPORTANT]` review banner to `README.md`. The upstream "HARD RULE" about it applies to pull requests sent to Zed, not to work in this fork. `README.md` is Vireo's public front page.
-* Put Vireo work in new crates wherever possible, and keep edits to upstream files small, so merges from `upstream/main` stay cheap.
+* Vireo is a hard fork. It does not merge `upstream/main`. Put code where it fits best, editing Zed's crates freely. Borrow upstream changes by cherry-picking them, and say so in the commit.
 
 # Rust coding guidelines
 

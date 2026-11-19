@@ -14,7 +14,7 @@ VS Code runs every window as a Chromium renderer plus a Node extension host, plu
 
 ## What we decided
 
-- **Built on Zed, kept close to upstream.** Vireo regularly merges upstream Zed. Our work lives in new crates wherever possible, so merges stay cheap.
+- **A hard fork of Zed.** Vireo started from Zed and now goes its own way. It does not merge upstream Zed regularly. We look at what Zed does and borrow ideas or individual changes when they fit.
 - **VS Code's layout and look.** Vireo arranges its window the way VS Code does:
   - an activity bar on the left, the sidebar next to it, and a secondary sidebar on the right
   - editor tabs with breadcrumbs, and a tabbed bottom panel
@@ -62,12 +62,14 @@ Vireo builds exactly like Zed:
 - [Building for Linux](./docs/src/development/linux.md)
 - [Building for Windows](./docs/src/development/windows.md)
 
-## Staying in sync with Zed
+## Borrowing from Zed
+
+Vireo does not track Zed. To look at a change made upstream and pick it up when it fits:
 
 ```sh
 git remote add upstream https://github.com/zed-industries/zed.git
 git fetch upstream
-git merge upstream/main
+git cherry-pick <commit>
 ```
 
 ## Licensing
