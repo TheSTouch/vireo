@@ -1,5 +1,6 @@
 mod action;
 mod agent;
+mod claude_code;
 mod editor;
 mod extension;
 mod fallible_options;
@@ -16,6 +17,7 @@ mod workspace;
 pub use action::{ActionName, ActionWithArguments, CommandAliasTarget};
 pub use agent::*;
 use anyhow::Context;
+pub use claude_code::*;
 pub use editor::*;
 pub use extension::*;
 pub use fallible_options::*;
@@ -210,6 +212,9 @@ pub struct SettingsContent {
 
     pub agent: Option<AgentSettingsContent>,
     pub agent_servers: Option<AllAgentServersSettings>,
+
+    /// Settings of Vireo's Claude Code panel.
+    pub claude_code: Option<ClaudeCodeSettingsContent>,
 
     /// Configuration of audio in Zed.
     pub audio: Option<AudioSettingsContent>,
@@ -407,7 +412,7 @@ fallible_options::flattened_deserialize!(SettingsContent {
     sections: { project, theme, extension, workspace, editor, remote },
     options: {
         call_hierarchy, command_palette, file_finder, git_panel, git_graph, tabs, tab_bar, tab_switcher, status_bar, preview_tabs, agent,
-        agent_servers, audio, auto_update, base_keymap, collaboration_panel, debugger, diagnostics,
+        agent_servers, claude_code, audio, auto_update, base_keymap, collaboration_panel, debugger, diagnostics,
         git,
         global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, hide_mouse,
         journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,

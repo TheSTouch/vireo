@@ -1,26 +1,26 @@
-# Claude Code in VS Core: parity checklist
+# Claude Code in Vireo: parity checklist
 
-VS Core's Claude Code panel is a native GPUI implementation (crates `claude_code_ui` and
+Vireo's Claude Code panel is a native GPUI implementation (crates `claude_code_ui` and
 `claude_ide`) that aims at the same features as the official Claude Code extension for VS Code,
 version **2.1.328**. The extension is proprietary. It was used only as a reference: features were
 inventoried from its `package.json`, by watching it run, and from Anthropic's public
 documentation. No code, styles, fonts, images or logos were taken from it.
 
 This page is the checklist for that work. Each row gives the feature, how the extension behaves, and
-VS Core's status:
+Vireo's status:
 
 - **Done**: works as described.
 - **Partial**: the core works; the note says what is missing.
 - **Todo**: not built yet.
-- **N/A**: does not apply to VS Core; the note says why.
+- **N/A**: does not apply to Vireo; the note says why.
 
 The column "Item" names the work item of the Foundation batch that owns the row (B-2 to B-8).
 
 ## Commands
 
-The extension declares 31 commands. VS Core exposes them as `claude_code::*` actions.
+The extension declares 31 commands. Vireo exposes them as `claude_code::*` actions.
 
-| Extension command | Title | Behaviour | VS Core action | Item | Status |
+| Extension command | Title | Behaviour | Vireo action | Item | Status |
 | --- | --- | --- | --- | --- | --- |
 | `claude-vscode.editor.open` | Open in New Tab | Opens a new conversation in an editor tab. | `claude_code::OpenInNewTab` | B-4 | Todo |
 | `claude-vscode.editor.openLast` | Open | Editor title-bar button. Opens Claude where it was last opened (`preferredLocation`). | `claude_code::Open` | B-4 | Todo |
@@ -29,7 +29,7 @@ The extension declares 31 commands. VS Core exposes them as `claude_code::*` act
 | `claude-vscode.sidebar.open` | Open in Side Bar | Opens Claude in the secondary side bar. | `claude_code::OpenInSideBar` (right dock) | B-4 | Todo |
 | `claude-vscode.newConversation` | New Conversation | Starts a new conversation in the focused Claude view. | `claude_code::NewConversation` | B-4 | Todo |
 | `claude-vscode.reopenClosedSession` | Reopen Closed Session | Reopens the most recently closed session tab. | `claude_code::ReopenClosedSession` | B-6 | Todo |
-| `claude-vscode.update` | Update extension | Updates the extension. | — | — | N/A: VS Core ships the panel in the app; it updates with VS Core. |
+| `claude-vscode.update` | Update extension | Updates the extension. | — | — | N/A: Vireo ships the panel in the app; it updates with Vireo. |
 | `claude-vscode.focus` | Focus input | Moves focus to the message box. | `claude_code::FocusInput` | B-4 | Todo |
 | `claude-vscode.focusLastMessage` | Focus last message | Moves focus to the last message, for screen readers. | `claude_code::FocusLastMessage` | B-4 | Todo |
 | `claude-vscode.blur` | Blur input | Gives focus back to the editor. | `claude_code::BlurInput` | B-4 | Todo |
@@ -56,12 +56,12 @@ The extension declares 31 commands. VS Core exposes them as `claude_code::*` act
 
 The extension also binds `claude-vscode.terminal.open.keyboard`, an internal variant of "Open in
 Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the voice dictation key
-(`cmd+d`, not in the command palette). VS Core maps them to `claude_code::OpenInTerminal` and
+(`cmd+d`, not in the command palette). Vireo maps them to `claude_code::OpenInTerminal` and
 `claude_code::ToggleDictation`.
 
 ## Keybindings
 
-| Keys (macOS / Linux, Windows) | Command | When | VS Core | Item | Status |
+| Keys (macOS / Linux, Windows) | Command | When | Vireo | Item | Status |
 | --- | --- | --- | --- | --- | --- |
 | `alt-k` / `alt-k` | Insert @-mention | Editor focused | `claude_code::InsertAtMention` in `Editor` context | B-7 | Todo |
 | `cmd-escape` / `ctrl-escape` | Focus input | Editor focused, not terminal mode | `claude_code::FocusInput` in `Editor` context | B-7 | Todo |
@@ -78,19 +78,19 @@ Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the 
 
 ## Settings
 
-The extension's settings live under `claudeCode.*`; VS Core's live under `claude_code` in
+The extension's settings live under `claudeCode.*`; Vireo's live under `claude_code` in
 `settings.json`, in snake case, with the same defaults.
 
-| Extension setting | Type, default | Behaviour | VS Core key | Item | Status |
+| Extension setting | Type, default | Behaviour | Vireo key | Item | Status |
 | --- | --- | --- | --- | --- | --- |
-| `environmentVariables` | array of `{name, value}`, `[]` | Extra environment for the `claude` process. | `environment_variables` | B-2 | Todo |
+| `environmentVariables` | array of `{name, value}`, `[]` | Extra environment for the `claude` process. | `environment_variables` | B-2 | Done |
 | `useTerminal` | bool, `false` | Run Claude in the terminal instead of the native UI. | `use_terminal` | B-8 | Todo |
 | `allowDangerouslySkipPermissions` | bool, unset (false) | Adds "Bypass permissions" to the mode menu. | `allow_dangerously_skip_permissions` | B-4 | Todo |
-| `claudeProcessWrapper` | string, unset | Executable used to launch Claude; the `claude` path is passed to it. | `claude_process_wrapper` | B-2 | Todo |
+| `claudeProcessWrapper` | string, unset | Executable used to launch Claude; the `claude` path is passed to it. | `claude_process_wrapper` | B-2 | Done |
 | `respectGitIgnore` | bool, `true` | File search for @-mentions respects `.gitignore`. | `respect_git_ignore` | B-4 | Todo |
-| `initialPermissionMode` | enum `default`, `manual`, `acceptEdits`, `plan`, `bypassPermissions`; unset | Mode of new conversations; `manual` is an alias of `default`. | `initial_permission_mode` | B-2 | Todo |
+| `initialPermissionMode` | enum `default`, `manual`, `acceptEdits`, `plan`, `bypassPermissions`; unset | Mode of new conversations; `manual` is an alias of `default`. | `initial_permission_mode` | B-2 | Done |
 | `disableLoginPrompt` | bool, `false` | Never show the login screen. | `disable_login_prompt` | B-8 | Todo |
-| `autosave` | bool, `true` | Save dirty buffers before Claude reads or writes them. | `autosave` | B-2 | Todo |
+| `autosave` | bool, `true` | Save dirty buffers before Claude reads or writes them. | `autosave` | B-2 | Done |
 | `focusView` | bool, `false` | Start in focus view. | `focus_view` | B-4 | Todo |
 | `useCtrlEnterToSend` | bool, `false` | Cmd/Ctrl+Enter sends, Enter inserts a newline. | `use_ctrl_enter_to_send` | B-4 | Todo |
 | `preferredLocation` | `sidebar` or `panel`, `panel` | Where Claude opens; updated when the user opens it elsewhere. | `preferred_location` | B-4 | Todo |
@@ -106,11 +106,11 @@ The extension's settings live under `claudeCode.*`; VS Core's live under `claude
 | `promptSuggestions` | bool, `true` | Show a suggested next prompt in the empty message box. | `prompt_suggestions` | B-4 | Todo |
 | `spinnerVerbs` | `{mode: append or replace, verbs: []}` | Verbs shown while Claude works. | `spinner_verbs` | B-4 | Todo |
 | `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Todo |
-| `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Todo |
+| `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Done |
 
 ## Menus and places
 
-| Place | Extension | VS Core | Item | Status |
+| Place | Extension | Vireo | Item | Status |
 | --- | --- | --- | --- | --- |
 | Editor title bar | Spark button "Open"; Accept / Reject buttons while a proposed diff is shown. | Claude button in the tab bar; Accept / Reject buttons in the diff view's toolbar. | B-4, B-5 | Todo |
 | Editor context menu | Accept / Reject change at cursor, in the proposed diff. | Same entries in the diff editor's context menu. | B-5 | Todo |
@@ -186,17 +186,17 @@ The protocol is NDJSON on stdin and stdout, as in Anthropic's open-source Agent 
 - stdout, a request from the CLI: `can_use_tool` (`tool_name`, `input`, `permission_suggestions`, `tool_use_id`, `blocked_path`, `decision_reason`). The answer is a `control_response` with `{"behavior":"allow","updatedInput":…,"updatedPermissions":[…]}` or `{"behavior":"deny","message":"…","interrupt":false}`.
 - stdout messages: `system` (`init` with session id, model, tools, slash commands; `session_state_changed`), `assistant`, `user` (tool results), `stream_event` (partial deltas), `result` (cost, usage, turns), `rate_limit_event`, `control_cancel_request`.
 
-| Behaviour | VS Core | Item | Status |
+| Behaviour | Vireo | Item | Status |
 | --- | --- | --- | --- |
-| Find `claude`: the user's install on PATH, `~/.claude/local/claude`, or `claude_process_wrapper` | `claude_code_ui::process` | B-2 | Todo |
-| Bundle the binary | Not bundled: VS Core uses the user's installed CLI. | — | N/A by decision |
-| Streaming, partial messages | `stream_event` deltas update the last message | B-2 | Todo |
-| Interrupt | `interrupt` control request | B-2 | Todo |
-| Permission requests | `can_use_tool` answered from the UI | B-2 | Todo |
-| Resume | `--resume=<id>` | B-2 | Todo |
-| Environment variables | `environment_variables` setting | B-2 | Todo |
-| Python environment | Prepends the workspace's `.venv` / `venv` `bin` to `PATH` and sets `VIRTUAL_ENV` | B-2 | Todo |
-| Autosave | Saves dirty buffers of the files a tool will read or write before allowing it | B-2 | Todo |
+| Find `claude`: the user's install on PATH, `~/.claude/local/claude`, or `claude_process_wrapper` | `claude_code_ui::process` | B-2 | Done |
+| Bundle the binary | Not bundled: Vireo uses the user's installed CLI. | — | N/A by decision |
+| Streaming, partial messages | `stream_event` deltas update the last message | B-2 | Done |
+| Interrupt | `interrupt` control request | B-2 | Done |
+| Permission requests | `can_use_tool` answered from the UI | B-2 | Done |
+| Resume | `--resume=<id>` | B-2 | Done |
+| Environment variables | `environment_variables` setting | B-2 | Done |
+| Python environment | Prepends the bin folder of the workspace's `.venv`, `venv`, `env` or `.env` (one with `pyvenv.cfg`) to `PATH` and sets `VIRTUAL_ENV` | B-2 | Done |
+| Autosave | A `PreToolUse` hook registered at `initialize` for Read, Edit, MultiEdit, Write and NotebookEdit; Vireo saves the file's dirty buffer before answering | B-2 | Done |
 
 ## IDE integration (`/ide`)
 
@@ -222,7 +222,7 @@ its name and version.
 
 **Tools** (exactly these five in 2.1.328; results are `{"content":[{"type":"text","text":…}]}`):
 
-| Tool | Input | Result | VS Core | Status |
+| Tool | Input | Result | Vireo | Status |
 | --- | --- | --- | --- | --- |
 | `openDiff` | `old_file_path`, `new_file_path`, `new_file_contents`, `tab_name` (all required) | Blocks until the user decides. `FILE_SAVED` followed by the final contents, or `DIFF_REJECTED` followed by the tab name. | Opens the proposed-diff view (B-5) | Todo |
 | `getDiagnostics` | `uri` (optional `file://` URI) | Pretty-printed JSON array, one entry per file: `[{"uri": "file:///…", "diagnostics": [{"message", "severity", "range": {"start": {"line", "character"}, "end": …}, "source", "code"}]}]`. The outer shape was observed; the item fields follow the public notes and VS Code's diagnostic type (0-based lines; severity `Error`, `Warning`, `Information` or `Hint`). | Project diagnostics | Todo |
@@ -231,7 +231,7 @@ its name and version.
 | `executeCode` | `code` | Text and image items from the kernel | Runs code in the REPL kernel of the active notebook / REPL editor | Todo |
 
 Earlier versions also served `openFile`, `getCurrentSelection`, `getLatestSelection`,
-`getOpenEditors`, `getWorkspaceFolders`, `checkDocumentDirty` and `saveDocument`. VS Core serves
+`getOpenEditors`, `getWorkspaceFolders`, `checkDocumentDirty` and `saveDocument`. Vireo serves
 them too, for older CLIs.
 
 **Notifications.**
@@ -244,5 +244,5 @@ them too, for older CLIs.
 
 | Behaviour | Item | Status |
 | --- | --- | --- |
-| VS Core is listed by `/ide` and `claude` in its terminal connects | B-3 | Todo |
+| Vireo is listed by `/ide` and `claude` in its terminal connects | B-3 | Todo |
 | Selections and diagnostics reach Claude | B-3 | Todo |

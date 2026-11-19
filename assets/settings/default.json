@@ -2062,6 +2062,59 @@
     //   - "no": never allow data collection.
     "allow_data_collection": "default",
   },
+  // Settings of Vireo's Claude Code panel.
+  "claude_code": {
+    // Environment variables for the `claude` process, as {"name": ..., "value": ...}.
+    "environment_variables": [],
+    // Run Claude in the terminal instead of the native panel.
+    "use_terminal": false,
+    // Allow the bypass permissions mode. Only for sandboxes with no internet access.
+    "allow_dangerously_skip_permissions": false,
+    // Executable used to launch Claude; it receives the `claude` path and arguments.
+    "claude_process_wrapper": null,
+    // Respect .gitignore files when searching files for @-mentions.
+    "respect_git_ignore": true,
+    // Permission mode of new conversations: "default", "manual", "acceptEdits",
+    // "plan" or "bypassPermissions". null defers to the Claude Code CLI.
+    "initial_permission_mode": null,
+    // Never prompt for login in the panel.
+    "disable_login_prompt": false,
+    // Save files automatically before Claude reads or writes them.
+    "autosave": true,
+    // Hide tool calls and activity, showing only prompts and replies.
+    "focus_view": false,
+    // Use Cmd/Ctrl+Enter to send, so that Enter inserts a newline.
+    "use_ctrl_enter_to_send": false,
+    // Where Claude opens by default: "panel" or "sidebar".
+    "preferred_location": "panel",
+    // Keep files opened from a Claude tab out of the pane that holds it.
+    "lock_editor_groups": true,
+    // Use Cmd/Ctrl+N for a new conversation while Claude is focused.
+    "enable_new_conversation_shortcut": false,
+    // Use Cmd/Ctrl+Shift+T to reopen the last closed Claude session.
+    "enable_reopen_closed_session_shortcut": true,
+    // Hide the onboarding checklist.
+    "hide_onboarding": false,
+    // Add the file open in the editor to your messages.
+    "attach_open_file": true,
+    // Add the text selected in the editor to your messages.
+    "attach_selection": true,
+    // After a restart, a restored session continues the interrupted step.
+    "continue_after_reload": true,
+    // Scroll to the bottom when you send a message.
+    "scroll_to_bottom_on_send": true,
+    // Show when each message was sent.
+    "show_message_timestamps": true,
+    // Suggest a next prompt after Claude replies.
+    "prompt_suggestions": true,
+    // Verbs shown while Claude works. "append" adds them to the built-in verbs;
+    // "replace" shows only these.
+    "spinner_verbs": { "mode": "append", "verbs": [] },
+    // Archive sessions idle for this many days (0, 1, 2, 7 or 14); 0 never archives.
+    "archive_inactive_sessions": 14,
+    // Activate the workspace's Python virtual environment for Claude.
+    "use_python_environment": true,
+  },
   // Settings specific to journaling
   "journal": {
     // The path of the directory where journal entries are stored

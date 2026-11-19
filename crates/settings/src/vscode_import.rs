@@ -187,6 +187,7 @@ impl VsCodeSettings {
             auto_update: None,
             base_keymap: Some(BaseKeymapContent::VSCode),
             calls: None,
+            claude_code: self.claude_code_settings_content(),
             collaboration_panel: None,
             command_palette: self
                 .read_u64("workbench.commandPalette.history")
@@ -248,6 +249,70 @@ impl VsCodeSettings {
             feature_flags: None,
             instrumentation: None,
         }
+    }
+
+    fn claude_code_settings_content(&self) -> Option<ClaudeCodeSettingsContent> {
+        let environment_variables = self
+            .read_value("claudeCode.environmentVariables")
+            .and_then(Value::as_array)
+            .map(|variables| {
+                variables
+                    .iter()
+                    .filter_map(|variable| {
+                        Some(ClaudeCodeEnvironmentVariable {
+                            name: variable.get("name")?.as_str()?.to_string(),
+                            value: variable.get("value")?.as_str()?.to_string(),
+                        })
+                    })
+                    .collect()
+            });
+        let spinner_verbs = self
+            .read_value("claudeCode.spinnerVerbs")
+            .and_then(|value| serde_json::from_value(value.clone()).ok());
+        skip_default(ClaudeCodeSettingsContent {
+            environment_variables,
+            use_terminal: self.read_bool("claudeCode.useTerminal"),
+            allow_dangerously_skip_permissions: self
+                .read_bool("claudeCode.allowDangerouslySkipPermissions"),
+            claude_process_wrapper: self.read_string("claudeCode.claudeProcessWrapper"),
+            respect_git_ignore: self.read_bool("claudeCode.respectGitIgnore"),
+            initial_permission_mode: self.read_enum("claudeCode.initialPermissionMode", |mode| {
+                match mode {
+                    "default" => Some(ClaudeCodePermissionMode::Default),
+                    "manual" => Some(ClaudeCodePermissionMode::Manual),
+                    "acceptEdits" => Some(ClaudeCodePermissionMode::AcceptEdits),
+                    "plan" => Some(ClaudeCodePermissionMode::Plan),
+                    "bypassPermissions" => Some(ClaudeCodePermissionMode::BypassPermissions),
+                    _ => None,
+                }
+            }),
+            disable_login_prompt: self.read_bool("claudeCode.disableLoginPrompt"),
+            autosave: self.read_bool("claudeCode.autosave"),
+            focus_view: self.read_bool("claudeCode.focusView"),
+            use_ctrl_enter_to_send: self.read_bool("claudeCode.useCtrlEnterToSend"),
+            preferred_location: self.read_enum("claudeCode.preferredLocation", |location| {
+                match location {
+                    "sidebar" => Some(ClaudeCodePreferredLocation::Sidebar),
+                    "panel" => Some(ClaudeCodePreferredLocation::Panel),
+                    _ => None,
+                }
+            }),
+            lock_editor_groups: self.read_bool("claudeCode.lockEditorGroups"),
+            enable_new_conversation_shortcut: self
+                .read_bool("claudeCode.enableNewConversationShortcut"),
+            enable_reopen_closed_session_shortcut: self
+                .read_bool("claudeCode.enableReopenClosedSessionShortcut"),
+            hide_onboarding: self.read_bool("claudeCode.hideOnboarding"),
+            attach_open_file: self.read_bool("claudeCode.attachOpenFile"),
+            attach_selection: self.read_bool("claudeCode.attachSelection"),
+            continue_after_reload: self.read_bool("claudeCode.continueAfterReload"),
+            scroll_to_bottom_on_send: self.read_bool("claudeCode.scrollToBottomOnSend"),
+            show_message_timestamps: self.read_bool("claudeCode.showMessageTimestamps"),
+            prompt_suggestions: self.read_bool("claudeCode.promptSuggestions"),
+            spinner_verbs,
+            archive_inactive_sessions: self.read_u32("claudeCode.archiveInactiveSessions"),
+            use_python_environment: self.read_bool("claudeCode.usePythonEnvironment"),
+        })
     }
 
     fn agent_settings_content(&self) -> Option<AgentSettingsContent> {
@@ -1248,6 +1313,50 @@ mod tests {
             .unwrap()
             .settings_content()
             .reduce_motion
+    }
+
+    #[test]
+    fn test_import_claude_code_settings() -> Result<()> {
+        let settings = VsCodeSettings::from_str(
+            r#"{
+                "claudeCode.useCtrlEnterToSend": true,
+                "claudeCode.initialPermissionMode": "plan",
+                "claudeCode.preferredLocation": "sidebar",
+                "claudeCode.archiveInactiveSessions": 7,
+                "claudeCode.environmentVariables": [{"name": "FOO", "value": "bar"}],
+                "claudeCode.spinnerVerbs": {"mode": "replace", "verbs": ["Brewing"]}
+            }"#,
+            VsCodeSettingsSource::VsCode,
+        )?;
+        let claude = settings
+            .settings_content()
+            .claude_code
+            .context("claude_code settings were not imported")?;
+        assert_eq!(claude.use_ctrl_enter_to_send, Some(true));
+        assert_eq!(
+            claude.initial_permission_mode,
+            Some(ClaudeCodePermissionMode::Plan)
+        );
+        assert_eq!(
+            claude.preferred_location,
+            Some(ClaudeCodePreferredLocation::Sidebar)
+        );
+        assert_eq!(claude.archive_inactive_sessions, Some(7));
+        assert_eq!(
+            claude.environment_variables,
+            Some(vec![ClaudeCodeEnvironmentVariable {
+                name: "FOO".into(),
+                value: "bar".into(),
+            }])
+        );
+        assert_eq!(
+            claude.spinner_verbs.map(|verbs| verbs.verbs),
+            Some(vec!["Brewing".to_string()])
+        );
+
+        let empty = VsCodeSettings::from_str("{}", VsCodeSettingsSource::VsCode)?;
+        assert_eq!(empty.settings_content().claude_code, None);
+        Ok(())
     }
 
     #[test]

@@ -1,0 +1,32 @@
+[package]
+name = "claude_code_ui"
+version = "0.1.0"
+edition.workspace = true
+publish.workspace = true
+license = "GPL-3.0-or-later"
+
+[lints]
+workspace = true
+
+[lib]
+path = "src/claude_code_ui.rs"
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+chrono.workspace = true
+futures.workspace = true
+gpui.workspace = true
+log.workspace = true
+paths.workspace = true
+project.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+settings.workspace = true
+util.workspace = true
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+settings = { workspace = true, features = ["test-support"] }
+tempfile.workspace = true

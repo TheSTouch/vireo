@@ -3012,6 +3012,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1d728cc89cf3aee9ff92b05e62b19ee65a02b5702cff7d5a377e32c6ae29d8d"
 
 [[package]]
+name = "claude_code_ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "futures 0.3.34",
+ "gpui",
+ "log",
+ "paths",
+ "project",
+ "rand 0.9.4",
+ "serde",
+ "serde_json",
+ "settings",
+ "tempfile",
+ "util",
+]
+
+[[package]]
 name = "cli"
 version = "0.1.0"
 dependencies = [
@@ -22554,6 +22573,7 @@ dependencies = [
  "channel",
  "chrono",
  "clap",
+ "claude_code_ui",
  "cli",
  "client",
  "clock",

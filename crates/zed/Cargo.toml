@@ -84,6 +84,7 @@ breadcrumbs.workspace = true
 call.workspace = true
 call_hierarchy.workspace = true
 channel.workspace = true
+claude_code_ui.workspace = true
 chrono.workspace = true
 clap.workspace = true
 cli.workspace = true
