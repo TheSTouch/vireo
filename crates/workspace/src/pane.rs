@@ -8838,17 +8838,18 @@ mod tests {
 
         cx.simulate_resize(size(px(300.), px(300.)));
 
-        add_labeled_item(&pane, "untitled", false, cx);
-        add_labeled_item(&pane, "untitled", false, cx);
-        add_labeled_item(&pane, "untitled", false, cx);
-        add_labeled_item(&pane, "untitled", false, cx);
+        // Vireo's VS Code-sized tabs are narrower than Zed's, so it takes
+        // more of them to overflow a 300 px pane.
+        for _ in 0..7 {
+            add_labeled_item(&pane, "untitled", false, cx);
+        }
         // Act: this should trigger a scroll
         add_labeled_item(&pane, "untitled", false, cx);
         // Assert
         let tab_bar_scroll_handle =
             pane.update_in(cx, |pane, _window, _cx| pane.tab_bar_scroll_handle.clone());
-        assert_eq!(tab_bar_scroll_handle.children_count(), 6);
-        let tab_bounds = cx.debug_bounds("TAB-4").unwrap();
+        assert_eq!(tab_bar_scroll_handle.children_count(), 9);
+        let tab_bounds = cx.debug_bounds("TAB-7").unwrap();
         let new_tab_button_bounds = cx.debug_bounds("ICON-Plus").unwrap();
         let scroll_bounds = tab_bar_scroll_handle.bounds();
         let scroll_offset = tab_bar_scroll_handle.offset();

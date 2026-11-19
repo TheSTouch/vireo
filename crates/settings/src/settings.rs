@@ -218,3 +218,69 @@ pub fn initial_debug_tasks_content() -> Cow<'static, str> {
 pub fn initial_local_debug_tasks_content() -> Cow<'static, str> {
     asset_str::<SettingsAssets>("settings/initial_local_debug_tasks.json")
 }
+
+#[cfg(test)]
+mod vireo_layout_defaults {
+    use serde_json::{Value, json};
+
+    use crate::{default_settings, parse_json_with_comments};
+
+    fn defaults() -> Value {
+        parse_json_with_comments(default_settings().as_ref())
+            .expect("default settings should parse")
+    }
+
+    fn assert_default(defaults: &Value, pointer: &str, expected: Value) {
+        assert_eq!(
+            defaults.pointer(pointer),
+            Some(&expected),
+            "default for {pointer} should match Vireo's VS Code-like layout"
+        );
+    }
+
+    #[test]
+    fn panels_dock_like_vs_code() {
+        let defaults = defaults();
+        assert_default(&defaults, "/project_panel/dock", json!("left"));
+        assert_default(&defaults, "/outline_panel/dock", json!("left"));
+        assert_default(&defaults, "/git_panel/dock", json!("left"));
+        assert_default(&defaults, "/debugger/dock", json!("left"));
+        assert_default(&defaults, "/agent/dock", json!("right"));
+        assert_default(&defaults, "/terminal/dock", json!("bottom"));
+        assert_default(&defaults, "/project_panel/default_width", json!(300));
+        assert_default(&defaults, "/outline_panel/default_width", json!(300));
+        assert_default(&defaults, "/git_panel/default_width", json!(300));
+    }
+
+    #[test]
+    fn keymap_and_fonts_match_vs_code_on_macos() {
+        let defaults = defaults();
+        assert_default(&defaults, "/base_keymap", json!("VSCode"));
+        assert_default(&defaults, "/buffer_font_family", json!("Menlo"));
+        assert_default(&defaults, "/buffer_font_size", json!(12));
+        assert_default(&defaults, "/buffer_line_height", json!({ "custom": 1.5 }));
+        assert_default(&defaults, "/ui_font_family", json!(".SystemUIFont"));
+        assert_default(&defaults, "/ui_font_size", json!(13));
+    }
+
+    #[test]
+    fn editor_chrome_matches_vs_code() {
+        let defaults = defaults();
+        assert_default(&defaults, "/minimap/show", json!("always"));
+        assert_default(&defaults, "/tabs/file_icons", json!(true));
+        assert_default(&defaults, "/tabs/git_status", json!(true));
+        assert_default(&defaults, "/tabs/show_diagnostics", json!("all"));
+        assert_default(&defaults, "/tab_bar/show_nav_history_buttons", json!(false));
+        assert_default(
+            &defaults,
+            "/preview_tabs/enable_preview_file_from_code_navigation",
+            json!(false),
+        );
+        assert_default(&defaults, "/status_bar/line_endings_button", json!(true));
+        assert_default(
+            &defaults,
+            "/status_bar/active_encoding_button",
+            json!("enabled"),
+        );
+    }
+}

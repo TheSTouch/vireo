@@ -24,11 +24,13 @@
   // 7. "Emacs"
   // 8. "Cursor"
   // 9. "None"
-  "base_keymap": "Zed",
+  "base_keymap": "VSCode",
   // The name of a font to use for rendering text in the editor
   // ".ZedMono" currently aliases to Lilex
   // but this may change in the future.
-  "buffer_font_family": ".ZedMono",
+  // Vireo defaults to Menlo, like VS Code on macOS. Where Menlo is not
+  // installed, Zed's font fallback resolves to ".ZedMono".
+  "buffer_font_family": "Menlo",
   // Set the buffer text's font fallbacks, this will be merged with
   // the platform's default fallbacks.
   "buffer_font_fallbacks": null,
@@ -38,7 +40,7 @@
     // "calt": false
   },
   // The default font size for text in the editor
-  "buffer_font_size": 15,
+  "buffer_font_size": 12,
   // The weight of the editor font in standard CSS units from 100 to 900.
   "buffer_font_weight": 400,
   // Set the buffer's line height.
@@ -51,12 +53,15 @@
   //         "buffer_line_height": {
   //           "custom": 2
   //         },
-  "buffer_line_height": "comfortable",
+  // Vireo uses VS Code's macOS line height: 1.5 times the font size.
+  "buffer_line_height": {
+    "custom": 1.5,
+  },
   // The name of a font to use for rendering text in the UI
   // You can set this to ".SystemUIFont" to use the system font
   // ".ZedSans" currently aliases to "IBM Plex Sans", but this may
   // change in the future
-  "ui_font_family": ".ZedSans",
+  "ui_font_family": ".SystemUIFont",
   // Set the UI's font fallbacks, this will be merged with the platform's
   // default font fallbacks.
   "ui_font_fallbacks": null,
@@ -68,7 +73,7 @@
   // The weight of the UI font in standard CSS units from 100 to 900.
   "ui_font_weight": 400,
   // The default font size for text in the UI
-  "ui_font_size": 16,
+  "ui_font_size": 13,
   // The font family for agent responses in the agent panel. Falls back to the UI font family if unset.
   "agent_ui_font_family": null,
   // The default font size for agent responses in the agent panel. Falls back to the UI font size if unset.
@@ -702,8 +707,9 @@
     // 2. Always show the minimap:
     //    "always"
     // 3. Never show the minimap:
-    //    "never" (default)
-    "show": "never",
+    //    "never"
+    // Vireo shows it always, like VS Code.
+    "show": "always",
     // Where to show the minimap in the editor.
     // This setting can take two values:
     // 1. Show the minimap on the focused editor only:
@@ -886,10 +892,10 @@
     "hide_gitignore": false,
     // Delay in milliseconds before tooltips appear for project panel titles.
     "title_tooltip_delay": "default",
-    // Default width of the project panel.
-    "default_width": 240,
+    // Default width of the project panel. 300 matches VS Code's sidebar.
+    "default_width": 300,
     // Where to dock the project panel. Can be 'left' or 'right'.
-    "dock": "right",
+    "dock": "left",
     // Spacing between worktree entries in the project panel. Can be 'comfortable' or 'standard'.
     "entry_spacing": "comfortable",
     // Whether to show file icons in the project panel.
@@ -1017,7 +1023,7 @@
     // Default width of the outline panel.
     "default_width": 300,
     // Where to dock the outline panel. Can be 'left' or 'right'.
-    "dock": "right",
+    "dock": "left",
     // Whether to show file icons in the outline panel.
     "file_icons": true,
     // What to show for directories in the outline panel.
@@ -1095,9 +1101,9 @@
     // Whether to show the git panel button in the status bar.
     "button": true,
     // Where to dock the git panel. Can be 'left' or 'right'.
-    "dock": "right",
-    // Default width of the git panel.
-    "default_width": 360,
+    "dock": "left",
+    // Default width of the git panel. 300 matches VS Code's sidebar.
+    "default_width": 300,
     // Style of the git status indicator in the panel.
     //
     // Choices: label_color, icon
@@ -1184,7 +1190,7 @@
     // Whether to show the agent panel button in the status bar.
     "button": true,
     // Where to dock the agent panel. Can be 'left', 'right' or 'bottom'.
-    "dock": "left",
+    "dock": "right",
     // Whether the agent panel should use flexible (proportional) sizing when docked
     // to the left or right. When enabled, `default_width` does not control the panel
     // width, and resetting the panel restores the default proportion.
@@ -1492,7 +1498,7 @@
     // Whether or not to show the tab bar in the editor
     "show": true,
     // Whether or not to show the navigation history buttons.
-    "show_nav_history_buttons": true,
+    "show_nav_history_buttons": false,
     // Whether or not to show the tab bar buttons.
     "show_tab_bar_buttons": true,
     // Whether or not to show pinned tabs in a separate row.
@@ -1510,12 +1516,12 @@
   // Settings related to the editor's tabs
   "tabs": {
     // Show git status colors in the editor tabs.
-    "git_status": false,
+    "git_status": true,
     // Position of the close button on the editor tabs.
     // One of: ["right", "left"]
     "close_position": "right",
     // Whether to show the file icon for a tab.
-    "file_icons": false,
+    "file_icons": true,
     // Controls the appearance behavior of the tab's close button.
     //
     // 1. Show it just upon hovering the tab. (default)
@@ -1544,7 +1550,7 @@
     //    "errors"
     // 3. Mark files with errors and warnings:
     //    "all"
-    "show_diagnostics": "off",
+    "show_diagnostics": "all",
   },
   // Settings related to preview tabs.
   "preview_tabs": {
@@ -1562,7 +1568,7 @@
     // Whether to open tabs in preview mode when code navigation is used to open a multibuffer.
     "enable_preview_multibuffer_from_code_navigation": false,
     // Whether to open tabs in preview mode when code navigation is used to open a single file.
-    "enable_preview_file_from_code_navigation": true,
+    "enable_preview_file_from_code_navigation": false,
     // Whether to keep tabs in preview mode when code navigation is used to navigate away from them.
     // If `enable_preview_file_from_code_navigation` or `enable_preview_multibuffer_from_code_navigation` is also true, the new tab may replace the existing one.
     "enable_keep_preview_on_code_navigation": false,
@@ -2077,9 +2083,9 @@
     // Whether to show the cursor position button in the status bar.
     "cursor_position_button": true,
     // Whether to show active line endings button in the status bar.
-    "line_endings_button": false,
+    "line_endings_button": true,
     // Control when to show the active encoding in the status bar.
-    "active_encoding_button": "non_utf8",
+    "active_encoding_button": "enabled",
     // Whether to show an indicator while multi-stroke input is pending.
     // If the input has a timeout, a countdown is shown and hovering pauses it.
     // Its binding preview popover is disabled when "which_key.enabled" is true.
@@ -3040,7 +3046,7 @@
     "stepping_granularity": "line",
     "save_breakpoints": true,
     "timeout": 2000,
-    "dock": "bottom",
+    "dock": "left",
     "default_width": 300,
     "default_height": 300,
     "log_dap_communications": true,
