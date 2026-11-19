@@ -15,6 +15,13 @@ VS Code runs every window as a Chromium renderer plus a Node extension host, plu
 ## What we decided
 
 - **Built on Zed, kept close to upstream.** Vireo regularly merges upstream Zed. Our work lives in new crates wherever possible, so merges stay cheap.
+- **VS Code's layout and look.** Vireo arranges its window the way VS Code does:
+  - an activity bar on the left, the sidebar next to it, and a secondary sidebar on the right
+  - editor tabs with breadcrumbs, and a tabbed bottom panel
+  - a title bar with a central search box, and VS Code's status bar layout
+  - VS Code's default themes (Dark Modern, Light Modern), Codicons and VS Code's default keybindings
+
+  The trademarked VS Code name and logo are not used.
 - **Our own addon system. VS Code extensions will not run.** We are not building a compatibility layer for the VS Code extension API. Instead, Vireo extends Zed's WebAssembly extension system with a **UI API**, so addons can add:
   - commands
   - panels and tree views
