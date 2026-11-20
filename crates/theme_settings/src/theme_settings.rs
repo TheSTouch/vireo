@@ -8,6 +8,7 @@
 mod schema;
 mod settings;
 
+use std::path::Path;
 use std::sync::Arc;
 
 use ::settings::{IntoGpui, Settings, SettingsStore};
@@ -237,6 +238,32 @@ pub fn load_bundled_themes(registry: &ThemeRegistry) {
 
         let refined = refine_theme_family(theme_family);
         registry.insert_theme_families([refined]);
+    }
+
+    load_bundled_icon_themes(registry);
+}
+
+/// Loads the icon themes bundled under `icons/color/`. Their icon paths are
+/// asset paths, so they resolve against an empty root.
+pub fn load_bundled_icon_themes(registry: &ThemeRegistry) {
+    let Some(icon_theme_paths) = registry.assets().list("icons/color/").log_err() else {
+        return;
+    };
+    for path in icon_theme_paths
+        .into_iter()
+        .filter(|path| path.ends_with("-icon-theme.json"))
+    {
+        let Some(contents) = registry.assets().load(&path).log_err().flatten() else {
+            continue;
+        };
+        registry
+            .load_icon_theme(
+                Path::new(path.as_ref()),
+                Path::new(""),
+                contents.into_owned(),
+            )
+            .with_context(|| format!("failed to load icon theme at path \"{path}\""))
+            .log_err();
     }
 }
 
@@ -561,5 +588,64 @@ mod vireo_theme_tests {
         assert_eq!(colors.tab_active_foreground, colors.text);
         assert_eq!(colors.status_bar_foreground, colors.text_muted);
         assert_eq!(colors.tab_active_border.a, 0.);
+    }
+}
+
+#[cfg(test)]
+mod vireo_icon_theme_tests {
+    use std::path::Path;
+
+    use theme::ThemeRegistry;
+
+    #[test]
+    fn seti_icon_theme_assigns_vs_code_file_icons() {
+        let registry = ThemeRegistry::new(Box::new(()));
+        registry
+            .load_icon_theme(
+                Path::new("icons/color/seti/seti-icon-theme.json"),
+                Path::new(""),
+                include_bytes!("../../../assets/icons/color/seti/seti-icon-theme.json").to_vec(),
+            )
+            .expect("Seti icon theme should load");
+
+        for (name, light) in [("Seti", false), ("Seti Light", true)] {
+            let theme = registry
+                .get_icon_theme(name)
+                .unwrap_or_else(|_| panic!("{name} should be registered"));
+            let icon_for_suffix = |suffix: &str| {
+                let icon_type = theme
+                    .file_suffixes
+                    .get(suffix)
+                    .expect("suffix should be mapped");
+                theme.file_icons[icon_type].path.to_string()
+            };
+            let suffix = if light { "_light" } else { "" };
+            assert_eq!(
+                icon_for_suffix("rs"),
+                format!("icons/color/seti/rust{suffix}.svg")
+            );
+            assert_eq!(
+                icon_for_suffix("md"),
+                format!("icons/color/seti/markdown{suffix}.svg")
+            );
+            assert_eq!(
+                theme.file_icons["default"].path.as_ref(),
+                format!("icons/color/seti/default{suffix}.svg")
+            );
+            // Every file type of Zed's default icon theme has a Seti icon, so
+            // no file falls back to Zed's monochrome artwork.
+            for icon_type in theme
+                .file_suffixes
+                .values()
+                .chain(theme.file_stems.values())
+            {
+                assert!(
+                    theme.file_icons[icon_type]
+                        .path
+                        .starts_with("icons/color/seti/"),
+                    "{name}: {icon_type} should use a Seti icon"
+                );
+            }
+        }
     }
 }

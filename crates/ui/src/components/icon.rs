@@ -133,6 +133,8 @@ pub fn git_hosting_provider_icon(provider_name: &str) -> IconName {
 /// The source of an icon.
 #[derive(Clone)]
 enum IconSource {
+    /// An embedded image drawn in its own colors rather than tinted.
+    EmbeddedImage(SharedString),
     /// An SVG embedded in the Zed binary.
     Embedded(SharedString),
     /// An image file located at the specified path.
@@ -155,6 +157,9 @@ pub struct Icon {
     rotation_period: Option<Duration>,
 }
 
+/// Embedded icons under this prefix keep their own colors.
+pub const EMBEDDED_COLOR_ICONS_PREFIX: &str = "icons/color/";
+
 impl Icon {
     pub fn new(icon: IconName) -> Self {
         Self {
@@ -168,11 +173,15 @@ impl Icon {
     }
 
     /// Create an icon from a path. Uses a heuristic to determine if it's embedded or external:
-    /// - Paths starting with "icons/" are treated as embedded SVGs
+    /// - Paths starting with "icons/color/" are embedded images drawn in their own colors
+    ///   (the file icons of icon themes bundled with Vireo)
+    /// - Other paths starting with "icons/" are treated as embedded SVGs, tinted with the icon color
     /// - Other paths are treated as external raster images (from icon themes)
     pub fn from_path(path: impl Into<SharedString>) -> Self {
         let path = path.into();
-        let source = if path.starts_with("icons/") {
+        let source = if path.starts_with(EMBEDDED_COLOR_ICONS_PREFIX) {
+            IconSource::EmbeddedImage(path)
+        } else if path.starts_with("icons/") {
             IconSource::Embedded(path)
         } else {
             IconSource::External(Arc::from(PathBuf::from(path.as_ref())))
@@ -257,6 +266,9 @@ impl RenderOnce for Icon {
                     .flex_none()
                     .text_color(color)
                     .into_any_element();
+            }
+            IconSource::EmbeddedImage(path) => {
+                return img(path).size(self.size).flex_none().into_any_element();
             }
         };
         let group_hover_color = self.group_hover_color.map(|color| color.color(cx));
@@ -391,5 +403,26 @@ impl Component for Icon {
                 )]),
             ])
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Icon, IconSource};
+
+    #[test]
+    fn bundled_color_icons_render_as_images() {
+        assert!(matches!(
+            Icon::from_path("icons/color/seti/rust.svg").source,
+            IconSource::EmbeddedImage(_)
+        ));
+        assert!(matches!(
+            Icon::from_path("icons/file_icons/rust.svg").source,
+            IconSource::Embedded(_)
+        ));
+        assert!(matches!(
+            Icon::from_path("/Users/me/.local/icons/rust.png").source,
+            IconSource::External(_)
+        ));
     }
 }

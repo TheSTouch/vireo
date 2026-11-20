@@ -1,0 +1,227 @@
+#!/usr/bin/env python3
+"""Build Vireo's default file icon theme from VS Code's Seti icon theme.
+
+Usage: script/import-seti-icons <microsoft/vscode checkout> <jesseweed/seti-ui checkout>
+
+VS Code draws Seti icons from a font, coloring each glyph from
+extensions/theme-seti/icons/vs-seti-icon-theme.json. seti-ui ships the same
+glyphs as SVGs. This script writes one SVG per (glyph, color) pair into
+assets/icons/color/seti, where the ui crate renders them in full color, and
+writes the icon theme family Zed loads at startup.
+
+Both are MIT licensed; see assets/icons/LICENSES.
+"""
+
+import json
+import re
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+OUTPUT = REPO / "assets/icons/color/seti"
+ASSET_PREFIX = "icons/color/seti"
+
+# VS Code assigns many icons by language id; Zed matches file names only.
+# These are the extensions and file names VS Code associates with each
+# language id that the Seti theme uses.
+LANGUAGE_FILES = {
+    "argdown": [".ad", ".adown", ".argdown", ".argdn"],
+    "bat": [".bat", ".cmd"],
+    "bicep": [".bicep"],
+    "blade": [".blade.php"],
+    "c": [".c", ".h", ".i"],
+    "clojure": [".clj", ".cljs", ".cljc", ".cljx", ".clojure", ".edn"],
+    "coffeescript": [".coffee", ".cson", ".iced"],
+    "cpp": [".cpp", ".cc", ".cxx", ".c++", ".hpp", ".hh", ".hxx", ".h++", ".ino", ".ipp", ".tpp", ".txx"],
+    "csharp": [".cs", ".csx", ".cake"],
+    "css": [".css"],
+    "cuda-cpp": [".cu", ".cuh"],
+    "dart": [".dart"],
+    "dockercompose": ["compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"],
+    "dockerfile": ["Dockerfile", "Containerfile", ".dockerfile", ".containerfile"],
+    "dotenv": [".env"],
+    "elixir": [".ex", ".exs"],
+    "elm": [".elm"],
+    "erb": [".erb", ".rhtml", ".html.erb"],
+    "fsharp": [".fs", ".fsi", ".fsx", ".fsscript"],
+    "git-commit": ["COMMIT_EDITMSG", "MERGE_MSG"],
+    "go": [".go"],
+    "godot": [".gd", ".tscn", ".tres", ".godot"],
+    "gradle": [".gradle", ".gradle.kts"],
+    "groovy": [".groovy", ".gvy", ".jenkinsfile", "Jenkinsfile"],
+    "haml": [".haml"],
+    "handlebars": [".handlebars", ".hbs", ".hjs"],
+    "haskell": [".hs", ".lhs"],
+    "haxe": [".hx"],
+    "html": [".html", ".htm", ".shtml", ".xhtml", ".xht", ".mdoc", ".jshtm"],
+    "ignore": [".gitignore", ".gitattributes", ".npmignore", ".dockerignore", ".eslintignore", ".prettierignore", ".git-blame-ignore-revs"],
+    "jade": [".jade", ".pug"],
+    "java": [".java", ".jav"],
+    "javascript": [".js", ".es6", ".mjs", ".cjs", ".pac"],
+    "javascriptreact": [".jsx"],
+    "jinja": [".jinja", ".jinja2", ".j2"],
+    "json": [".json", ".bowerrc", ".jscsrc", ".webmanifest", ".js.map", ".css.map", ".har", ".jslintrc", ".jsonld"],
+    "jsonc": [".jsonc", ".eslintrc", ".eslintrc.json", ".jsfmtrc", ".jshintrc", ".swcrc", "tsconfig.json", "jsconfig.json"],
+    "jsonl": [".jsonl", ".ndjson"],
+    "julia": [".jl"],
+    "kotlin": [".kt", ".kts"],
+    "latex": [".latex", ".ltx", ".ctx"],
+    "less": [".less"],
+    "lua": [".lua"],
+    "makefile": ["Makefile", "makefile", "GNUmakefile", "OCamlMakefile", ".mak", ".mk"],
+    "markdown": [".md", ".mkd", ".mdwn", ".mdown", ".markdown", ".markdn", ".mdtxt", ".mdtext", ".workbook"],
+    "mustache": [".mustache", ".mst", ".mu", ".stache"],
+    "nunjucks": [".njk", ".nunjucks", ".nunjs", ".nunj"],
+    "objective-c": [".m"],
+    "objective-cpp": [".mm"],
+    "ocaml": [".ml", ".mli", ".mll", ".mly"],
+    "perl": [".pl", ".pm", ".pod", ".t", ".PL", ".psgi"],
+    "php": [".php", ".php4", ".php5", ".phtml", ".ctp"],
+    "postcss": [".pcss", ".postcss"],
+    "powershell": [".ps1", ".psm1", ".psd1", ".pssc", ".psrc"],
+    "properties": [".properties", ".cfg", ".conf", ".directory", ".gitconfig", ".editorconfig", ".npmrc", ".ini"],
+    "python": [".py", ".rpy", ".pyw", ".cpy", ".gyp", ".gypi", ".pyi", ".ipy", ".pyt"],
+    "r": [".r", ".rhistory", ".rprofile", ".rt"],
+    "razor": [".cshtml", ".razor"],
+    "rescript": [".res", ".resi"],
+    "ruby": [".rb", ".rbx", ".rjs", ".gemspec", ".rake", ".ru", ".podspec", ".rbi", "Gemfile", "Rakefile", "Podfile", "Guardfile", "Vagrantfile"],
+    "rust": [".rs"],
+    "sass": [".sass"],
+    "scss": [".scss"],
+    "shellscript": [".sh", ".bash", ".bashrc", ".bash_aliases", ".bash_profile", ".bash_login", ".ebuild", ".profile", ".bash_logout", ".xprofile", ".zsh", ".zshrc", ".zprofile", ".zlogin", ".zlogout", ".zshenv", ".zsh-theme", ".ksh", ".csh", ".cshrc", ".tcshrc", ".yashrc", ".yash_profile"],
+    "sql": [".sql", ".dsql"],
+    "stylus": [".styl"],
+    "swift": [".swift"],
+    "terraform": [".tf", ".tfvars"],
+    "tex": [".tex", ".sty", ".cls", ".dtx", ".ins"],
+    "typescript": [".ts", ".cts", ".mts"],
+    "typescriptreact": [".tsx"],
+    "vala": [".vala", ".vapi"],
+    "vue": [".vue"],
+    "xml": [".xml", ".xsd", ".ascx", ".atom", ".axml", ".bpmn", ".csproj", ".dtd", ".fsproj", ".nuspec", ".plist", ".props", ".resx", ".svg", ".targets", ".vbproj", ".vcxproj", ".xaml", ".xlf", ".xliff", ".xsl", ".xslt", ".config"],
+    "yaml": [".yml", ".yaml", ".eyaml", ".eyml", ".cff", ".yaml-tmlanguage"],
+}
+
+
+def glyph_name(icon_key):
+    name = icon_key.lstrip("_")
+    name = re.sub(r"_light$", "", name)
+    return re.sub(r"_\d+$", "", name)
+
+
+def colored_svg(svg, fill):
+    svg = re.sub(r"<style.*?</style>", "", svg, flags=re.S)
+    svg = re.sub(r'\s(fill|class)="[^"]*"', "", svg)
+    return re.sub(r"<svg\b", f'<svg fill="{fill}"', svg, count=1)
+
+
+def zed_type_suffixes():
+    """Reads the default icon theme's type keys and suffixes from crates/theme."""
+    source = (REPO / "crates/theme/src/icon_theme.rs").read_text()
+    result = {}
+    for block in ("FILE_STEMS_BY_ICON_KEY", "FILE_SUFFIXES_BY_ICON_KEY"):
+        body = source.split(f"const {block}")[1].split("];\n", 1)[0]
+        for key, values in re.findall(r'\("([^"]+)",\s*&\[([^\]]*)\]\)', body):
+            result.setdefault(key, []).extend(re.findall(r'"([^"]+)"', values))
+    icons = source.split("const FILE_ICONS")[1].split("];\n", 1)[0]
+    for key in re.findall(r'\("([^"]+)",', icons):
+        result.setdefault(key, [])
+    return result
+
+
+def theme(seti, icon_section, name, appearance):
+    definitions = seti["iconDefinitions"]
+    file_icons = {}
+
+    def icon_for(icon_key):
+        if icon_key not in definitions:
+            return None
+        type_key = icon_key.lstrip("_")
+        file_icons[type_key] = {"path": f"{ASSET_PREFIX}/{type_key}.svg"}
+        return type_key
+
+    file_suffixes = {}
+    file_stems = {}
+
+    def assign(pattern, type_key):
+        if type_key is None:
+            return
+        if pattern.startswith("."):
+            file_suffixes.setdefault(pattern[1:], type_key)
+            # Dotfiles such as ".gitignore" are matched as whole file names.
+            file_stems.setdefault(pattern, type_key)
+        else:
+            file_stems.setdefault(pattern, type_key)
+
+    for file_name, icon_key in icon_section["fileNames"].items():
+        file_stems[file_name] = icon_for(icon_key)
+    for extension, icon_key in icon_section["fileExtensions"].items():
+        file_suffixes[extension] = icon_for(icon_key)
+    for language, icon_key in icon_section["languageIds"].items():
+        type_key = icon_for(icon_key)
+        for pattern in LANGUAGE_FILES.get(language, []):
+            assign(pattern, type_key)
+
+    default_key = icon_for(icon_section["file"])
+    file_icons["default"] = file_icons[default_key]
+
+    # Zed merges its default theme's file types into every icon theme, so
+    # give each of those types a Seti icon: the one Seti uses for any of the
+    # type's suffixes, else Seti's default file icon.
+    for type_key, patterns in zed_type_suffixes().items():
+        if type_key in file_icons:
+            continue
+        match = next(
+            (
+                file_suffixes.get(pattern) or file_stems.get(pattern) or file_stems.get("." + pattern)
+                for pattern in patterns
+                if file_suffixes.get(pattern) or file_stems.get(pattern) or file_stems.get("." + pattern)
+            ),
+            default_key,
+        )
+        file_icons[type_key] = file_icons[match]
+
+    return {
+        "name": name,
+        "appearance": appearance,
+        "file_stems": {key: value for key, value in file_stems.items() if value},
+        "file_suffixes": {key: value for key, value in file_suffixes.items() if value},
+        "file_icons": file_icons,
+    }
+
+
+def main():
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
+    seti = json.loads((Path(sys.argv[1]) / "extensions/theme-seti/icons/vs-seti-icon-theme.json").read_text())
+    glyphs = Path(sys.argv[2]) / "icons"
+
+    OUTPUT.mkdir(parents=True, exist_ok=True)
+    for old in OUTPUT.glob("*.svg"):
+        old.unlink()
+    for icon_key, definition in seti["iconDefinitions"].items():
+        # "_todo" has no color in VS Code; it inherits the default file color.
+        svg = (glyphs / f"{glyph_name(icon_key)}.svg").read_text()
+        (OUTPUT / f"{icon_key.lstrip('_')}.svg").write_text(colored_svg(svg, definition.get("fontColor", "#d4d7d6")) + "\n")
+
+    light = {
+        "file": seti["light"]["file"],
+        "fileNames": {**seti["fileNames"], **seti["light"]["fileNames"]},
+        "fileExtensions": {**seti["fileExtensions"], **seti["light"]["fileExtensions"]},
+        "languageIds": {**seti["languageIds"], **seti["light"]["languageIds"]},
+    }
+    family = {
+        "$schema": "https://zed.dev/schema/icon_themes/v0.3.0.json",
+        "name": "Seti",
+        "author": "Jesse Weed and Microsoft Corporation, ported to Vireo",
+        "themes": [
+            theme(seti, seti, "Seti", "dark"),
+            theme(seti, light, "Seti Light", "light"),
+        ],
+    }
+    (OUTPUT / "seti-icon-theme.json").write_text(json.dumps(family, indent=2, sort_keys=True) + "\n")
+    print(f"wrote {len(seti['iconDefinitions'])} icons and {OUTPUT.relative_to(REPO)}/seti-icon-theme.json")
+
+
+if __name__ == "__main__":
+    main()

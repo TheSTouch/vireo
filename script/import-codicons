@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Copy Codicons over Zed's UI icons so Vireo's chrome looks like VS Code's.
+
+Usage: script/import-codicons <path to microsoft/vscode-codicons checkout>
+
+Each entry maps a file in assets/icons (named after crates/icons' IconName) to
+a Codicon in src/icons. Icons with no close Codicon keep Zed's Lucide artwork.
+Codicons are CC BY 4.0; see assets/icons/LICENSES.
+"""
+
+import sys
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+ICONS = REPO / "assets/icons"
+
+CODICONS = {
+    # Activity bar and layout controls. These names are new in Vireo.
+    "activity_explorer": "files",
+    "activity_search": "search",
+    "activity_source_control": "source-control",
+    "activity_run_debug": "debug-alt",
+    "activity_extensions": "extensions",
+    "activity_accounts": "account",
+    "activity_manage": "settings-gear",
+    "layout_sidebar_left": "layout-sidebar-left",
+    "layout_sidebar_left_off": "layout-sidebar-left-off",
+    "layout_panel": "layout-panel",
+    "layout_panel_off": "layout-panel-off",
+    "layout_sidebar_right": "layout-sidebar-right",
+    "layout_sidebar_right_off": "layout-sidebar-right-off",
+    "remote": "remote",
+    "sync": "sync",
+    "outline": "symbol-class",
+    "timeline": "history",
+    # Zed's existing icons.
+    "arrow_down": "arrow-down",
+    "arrow_left": "arrow-left",
+    "arrow_right": "arrow-right",
+    "arrow_up": "arrow-up",
+    "arrow_up_right": "link-external",
+    "bell": "bell",
+    "bell_dot": "bell-dot",
+    "bell_off": "bell-slash",
+    "book": "book",
+    "bookmark": "bookmark",
+    "case_sensitive": "case-sensitive",
+    "check": "check",
+    "check_double": "check-all",
+    "chevron_down": "chevron-down",
+    "chevron_left": "chevron-left",
+    "chevron_right": "chevron-right",
+    "chevron_up": "chevron-up",
+    "circle_help": "question",
+    "close": "close",
+    "code": "code",
+    "copy": "copy",
+    "debug": "debug-alt",
+    "debug_breakpoint": "circle-filled",
+    "debug_continue": "debug-continue",
+    "debug_detach": "debug-disconnect",
+    "debug_disabled_breakpoint": "circle-filled",
+    "debug_disabled_log_breakpoint": "debug-breakpoint-log-unverified",
+    "debug_log_breakpoint": "debug-breakpoint-log",
+    "debug_pause": "debug-pause",
+    "debug_step_into": "debug-step-into",
+    "debug_step_out": "debug-step-out",
+    "debug_step_over": "debug-step-over",
+    "diff": "diff",
+    "download": "cloud-download",
+    "ellipsis": "ellipsis",
+    "envelope": "mail",
+    "eye": "eye",
+    "eye_off": "eye-closed",
+    "file": "file",
+    "file_code": "file-code",
+    "file_diff": "diff",
+    "file_generic": "file",
+    "file_multiple": "files",
+    "file_tree": "files",
+    "filter": "filter",
+    "folder": "folder",
+    "folder_add": "new-folder",
+    "folder_open": "folder-opened",
+    "git_branch": "git-branch",
+    "git_commit": "git-commit",
+    "git_merge_conflict": "git-merge",
+    "github": "github",
+    "history_rerun": "history",
+    "info": "info",
+    "json": "json",
+    "keyboard": "record-keys",
+    "link": "link",
+    "list_collapse": "collapse-all",
+    "list_tree": "list-tree",
+    "lock": "lock",
+    "magnifying_glass": "search",
+    "maximize": "screen-full",
+    "menu": "menu",
+    "mic": "mic",
+    "minimize": "screen-normal",
+    "pencil": "edit",
+    "person": "account",
+    "pin": "pin",
+    "play_outlined": "play",
+    "plus": "add",
+    "pull_request": "git-pull-request",
+    "refresh_title": "refresh",
+    "regex": "regex",
+    "replace": "replace",
+    "replace_all": "replace-all",
+    "server": "server",
+    "settings": "settings-gear",
+    "sparkle": "sparkle",
+    "split": "split-horizontal",
+    "star": "star-empty",
+    "star_filled": "star-full",
+    "stop": "debug-stop",
+    "terminal": "terminal",
+    "trash": "trash",
+    "user_group": "organization",
+    "warning": "warning",
+    "whole_word": "whole-word",
+    "x_circle": "error",
+}
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    source = Path(sys.argv[1]) / "src/icons"
+    missing = []
+    for zed_name, codicon in CODICONS.items():
+        svg = source / f"{codicon}.svg"
+        if not svg.exists():
+            missing.append(codicon)
+            continue
+        (ICONS / f"{zed_name}.svg").write_text(svg.read_text().strip() + "\n")
+    if missing:
+        sys.exit(f"missing codicons: {', '.join(missing)}")
+    print(f"copied {len(CODICONS)} codicons into {ICONS.relative_to(REPO)}")
+
+
+if __name__ == "__main__":
+    main()

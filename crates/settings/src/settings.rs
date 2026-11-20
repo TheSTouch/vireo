@@ -256,6 +256,11 @@ mod vireo_layout_defaults {
     fn keymap_and_fonts_match_vs_code_on_macos() {
         let defaults = defaults();
         assert_default(&defaults, "/base_keymap", json!("VSCode"));
+        assert_default(
+            &defaults,
+            "/icon_theme",
+            json!({ "mode": "system", "light": "Seti Light", "dark": "Seti" }),
+        );
         assert_default(&defaults, "/buffer_font_family", json!("Menlo"));
         assert_default(&defaults, "/buffer_font_size", json!(12));
         assert_default(&defaults, "/buffer_line_height", json!({ "custom": 1.5 }));

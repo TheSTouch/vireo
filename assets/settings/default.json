@@ -11,7 +11,13 @@
     "light": "Light Modern",
     "dark": "Dark Modern",
   },
-  "icon_theme": "Zed (Default)",
+  // Vireo uses VS Code's default file icons (Seti), in their light and dark
+  // colorings. "Zed (Default)" brings back Zed's monochrome icons.
+  "icon_theme": {
+    "mode": "system",
+    "light": "Seti Light",
+    "dark": "Seti",
+  },
   // The name of a base set of key bindings to use.
   // This setting can take the following values:
   //
