@@ -3293,7 +3293,8 @@ mod tests {
             .update(cx, |multi_workspace, window, cx| {
                 multi_workspace.workspace().update(cx, |workspace, cx| {
                     assert_eq!(workspace.worktrees(cx).count(), 2);
-                    assert!(workspace.right_dock().read(cx).is_open());
+                    // The project panel opens with a folder; Vireo docks it left.
+                    assert!(workspace.left_dock().read(cx).is_open());
                     assert!(
                         workspace
                             .active_pane()
@@ -5204,7 +5205,9 @@ mod tests {
             .unwrap();
         let cx = &mut VisualTestContext::from_window(*window, cx);
 
-        let mouse_position = point(px(250.), px(250.));
+        // Vireo docks the project panel left (48 px activity bar, 300 px
+        // panel), so the editor starts past x = 348.
+        let mouse_position = point(px(600.), px(250.));
 
         let event_modifiers = {
             #[cfg(target_os = "macos")]

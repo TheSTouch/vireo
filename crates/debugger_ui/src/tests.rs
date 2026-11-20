@@ -40,7 +40,13 @@ pub fn init_test(cx: &mut gpui::TestAppContext) {
     zlog::init_test();
 
     cx.update(|cx| {
-        let settings = SettingsStore::test(cx);
+        let mut settings = SettingsStore::test(cx);
+        // Vireo docks the debugger left, as VS Code's Run and Debug view.
+        // These tests were written for Zed's bottom dock, whose width keeps
+        // console lines from wrapping and whose axis the layout tests flip.
+        settings.update_user_settings(cx, |settings| {
+            settings.debugger.get_or_insert_default().dock = Some(settings::DockPosition::Bottom);
+        });
         cx.set_global(settings);
         terminal_view::init(cx);
         theme_settings::init(theme::LoadThemes::JustBase, cx);
