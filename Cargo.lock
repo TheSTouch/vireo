@@ -3042,6 +3042,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
+ "buffer_diff",
  "chrono",
  "claude_ide",
  "editor",
@@ -3061,6 +3062,7 @@ dependencies = [
  "serde_json",
  "settings",
  "tempfile",
+ "text",
  "theme",
  "theme_settings",
  "ui",

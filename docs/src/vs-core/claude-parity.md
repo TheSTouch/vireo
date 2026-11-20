@@ -35,18 +35,18 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.blur` | Blur input | Gives focus back to the editor. | `claude_code::BlurInput` | B-4 | Done |
 | `claude-vscode.logout` | Logout | Runs the CLI's logout. | `claude_code::Logout` | B-8 | Todo |
 | `claude-vscode.terminal.open` | Open in Terminal | Runs `claude` in an integrated terminal. | `claude_code::OpenInTerminal` | B-8 | Todo |
-| `claude-vscode.acceptProposedDiff` | Accept Proposed Changes | Accepts the whole proposed diff. | `claude_code::AcceptProposedDiff` | B-5 | Todo |
-| `claude-vscode.rejectProposedDiff` | Reject Proposed Changes | Rejects the whole proposed diff. | `claude_code::RejectProposedDiff` | B-5 | Todo |
-| `claude-vscode.acceptProposedHunk` | Accept Change at Cursor | Accepts the hunk under the cursor. | `claude_code::AcceptProposedHunk` | B-5 | Todo |
-| `claude-vscode.rejectProposedHunk` | Reject Change at Cursor | Rejects the hunk under the cursor. | `claude_code::RejectProposedHunk` | B-5 | Todo |
-| `claude-vscode.acceptProposedHunkFromBar` | Accept this change | Button on the per-hunk comment bar. | Hunk button calling `AcceptProposedHunk` | B-5 | Todo |
-| `claude-vscode.rejectProposedHunkFromBar` | Reject this change | Button on the per-hunk comment bar. | Hunk button calling `RejectProposedHunk` | B-5 | Todo |
+| `claude-vscode.acceptProposedDiff` | Accept Proposed Changes | Accepts the whole proposed diff. | `claude_code::AcceptProposedDiff` | B-5 | Done |
+| `claude-vscode.rejectProposedDiff` | Reject Proposed Changes | Rejects the whole proposed diff. | `claude_code::RejectProposedDiff` | B-5 | Done |
+| `claude-vscode.acceptProposedHunk` | Accept Change at Cursor | Accepts the hunk under the cursor. | `claude_code::AcceptProposedHunk` | B-5 | Done |
+| `claude-vscode.rejectProposedHunk` | Reject Change at Cursor | Rejects the hunk under the cursor. | `claude_code::RejectProposedHunk` | B-5 | Done |
+| `claude-vscode.acceptProposedHunkFromBar` | Accept this change | Button on the per-hunk comment bar. | Hunk button calling `AcceptProposedHunk` | B-5 | Done |
+| `claude-vscode.rejectProposedHunkFromBar` | Reject this change | Button on the per-hunk comment bar. | Hunk button calling `RejectProposedHunk` | B-5 | Done |
 | `claude-vscode.insertAtMention` | Insert @-Mention Reference | Inserts `@file#start-end` for the editor selection into the message box. | `claude_code::InsertAtMention` | B-4 | Done |
 | `claude-vscode.addToChat` | Add to Chat | Explorer context menu: adds a file or folder as an @-mention. | `claude_code::AddToChat` | B-8 | Todo |
 | `claude-vscode.installPlugin` | Install Plugin | Installs a Claude Code plugin by name. | `claude_code::InstallPlugin` | B-8 | Todo |
-| `claude-code.acceptProposedDiff` | Accept Proposed Changes | Terminal-mode (`/ide`) variant: accepts a diff opened by `openDiff`. | `claude_code::AcceptProposedDiff` (same action) | B-5 | Todo |
-| `claude-code.rejectProposedDiff` | Reject Proposed Changes | Terminal-mode variant. | `claude_code::RejectProposedDiff` (same action) | B-5 | Todo |
-| `claude-code.insertAtMentioned` | Insert At-Mentioned | Terminal mode: sends an `at_mentioned` notification to the connected CLI. | `claude_code::InsertAtMentioned` | B-3 | Todo: the server sends `at_mentioned`; the action lands with B-4 |
+| `claude-code.acceptProposedDiff` | Accept Proposed Changes | Terminal-mode (`/ide`) variant: accepts a diff opened by `openDiff`. | `claude_code::AcceptProposedDiff` (same action) | B-5 | Done |
+| `claude-code.rejectProposedDiff` | Reject Proposed Changes | Terminal-mode variant. | `claude_code::RejectProposedDiff` (same action) | B-5 | Done |
+| `claude-code.insertAtMentioned` | Insert At-Mentioned | Terminal mode: sends an `at_mentioned` notification to the connected CLI. | `claude_code::InsertAtMentioned` | B-3, B-4 | Done |
 | `claude-vscode.showLogs` | Show Logs | Opens the extension's log channel. | `claude_code::ShowLogs` | B-8 | Todo |
 | `claude-vscode.toggleFocusView` | Toggle Focus view | Hides tool calls and activity, showing only prompts and replies. | `claude_code::ToggleFocusView` | B-4 | Done |
 | `claude-vscode.openWalkthrough` | Open Walkthrough | Opens the "Get started" walkthrough. | `claude_code::OpenWalkthrough` | B-8 | Todo |
@@ -112,9 +112,9 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 
 | Place | Extension | Vireo | Item | Status |
 | --- | --- | --- | --- | --- |
-| Editor title bar | Spark button "Open"; Accept / Reject buttons while a proposed diff is shown. | Claude button in the tab bar; Accept / Reject buttons in the diff view's toolbar. | B-4, B-5 | Todo |
-| Editor context menu | Accept / Reject change at cursor, in the proposed diff. | Same entries in the diff editor's context menu. | B-5 | Todo |
-| Comment bar on each hunk | "Accept this change" / "Reject this change". | Per-hunk accept / reject buttons. | B-5 | Todo |
+| Editor title bar | Spark button "Open"; Accept / Reject buttons while a proposed diff is shown. | Claude button in the tab bar; Accept / Reject buttons in the diff view's toolbar. | B-4, B-5 | Done: Accept / Reject in the proposed diff's header |
+| Editor context menu | Accept / Reject change at cursor, in the proposed diff. | Same entries in the diff editor's context menu. | B-5 | Done |
+| Comment bar on each hunk | "Accept this change" / "Reject this change". | Per-hunk accept / reject buttons. | B-5 | Done |
 | Explorer context menu | "Claude Code: Add to Chat" on files and folders, not on roots. | Project panel context menu entry. | B-8 | Todo |
 | Session tab context menu | Mark Session as Unread, Rename Session Tab, Add Session Tab to Group. | Tab context menu and sessions list menu. | B-6 | Todo |
 | Activity bar / secondary side bar | Claude Code view container; a separate sessions-list view when enabled. | Right dock panel with its own sessions list. | B-4, B-6 | Done |
@@ -133,7 +133,7 @@ Observed in the running extension, version 2.1.328.
 | Markdown | Assistant text renders as Markdown: headings, lists, links, inline code, code blocks. | B-4 | Done |
 | Thinking | Collapsed row "Thought for Ns"; expands to the thinking text. "Thinking…" while it streams. | B-4 | Done |
 | Tool-call blocks | A row naming the tool and its description, e.g. "Bash  Check the build result". Expanded, an IN block shows the input and an OUT block the result. The dot is green on success, red on error, animated while running. | B-4 | Done |
-| Edit / Write blocks | File name and a small inline diff of the change. | B-4 | Partial: the file and the old and new text; the real diff opens in the review view (B-5) |
+| Edit / Write blocks | File name and a small inline diff of the change. | B-4 | Partial: the file and the old and new text in the timeline; the real diff opens in the review view (B-5, done) |
 | Permission prompts | Inline card for a tool that needs approval: "Yes", "Yes, and don't ask again" (or "Yes, allow all edits this session"), and "No" with a "Tell Claude what to do instead" field. Up/down and number keys pick an option. | B-4 | Partial: Yes, Yes and don't ask again (sends the CLI's suggestions), No with a message; number keys are not bound |
 | Plan approval | In plan mode, the plan is shown for approval, with an option to keep planning. | B-4 | Partial: shown as the permission card of the plan tool |
 | AskUserQuestion | Questions from Claude render as a picker with options and free text. | B-4 | Todo: shown as a generic permission card |
@@ -224,7 +224,7 @@ its name and version.
 
 | Tool | Input | Result | Vireo | Status |
 | --- | --- | --- | --- | --- |
-| `openDiff` | `old_file_path`, `new_file_path`, `new_file_contents`, `tab_name` (all required) | Blocks until the user decides. `FILE_SAVED` followed by the final contents, or `DIFF_REJECTED` followed by the tab name. | Opens the proposed-diff view; served once the diff view lands (B-5) | Todo |
+| `openDiff` | `old_file_path`, `new_file_path`, `new_file_contents`, `tab_name` (all required) | Blocks until the user decides. `FILE_SAVED` followed by the final contents, or `DIFF_REJECTED` followed by the tab name. | Opens the proposed-diff view and answers when the person accepts, rejects or reviews every hunk; closing the tab rejects | Done |
 | `getDiagnostics` | `uri` (optional `file://` URI) | Pretty-printed JSON array, one entry per file: `[{"uri": "file:///…", "diagnostics": [{"message", "severity", "range": {"start": {"line", "character"}, "end": …}, "source", "code"}]}]`. The outer shape was observed; the item fields follow the public notes and VS Code's diagnostic type (0-based lines; severity `Error`, `Warning`, `Information` or `Hint`). | Diagnostics of the project's language servers, for one file or all files with diagnostics | Done |
 | `close_tab` | `tab_name` | `TAB_CLOSED` | Closes the proposed diff with that name | Done |
 | `closeAllDiffTabs` | none | `CLOSED_<n>_DIFF_TABS` | Closes every proposed diff | Done |
@@ -243,6 +243,15 @@ server that does not select the `mcp` subprotocol is dropped, and the CLI shows 
 port, which would make the CLI open a second diff next to the permission prompt. It declares an
 in-process MCP server named `vireo` with `--mcp-config` and answers its `mcp_message` requests
 itself, serving `getDiagnostics` and `executeCode` as `mcp__vireo__*` tools (done).
+
+**Proposed diffs (B-5).** An Edit, MultiEdit or Write that the panel's `claude` asks permission
+for opens a "<file> (proposed)" tab: the proposal as an editable buffer diffed against the file on
+disk. Accept or Reject in its header answer for the whole file; each hunk has "Accept this change"
+and "Reject this change"; the context menu has the cursor and whole-file variants. Once every hunk
+is reviewed the tab closes and answers by itself. If the person edited the proposal, the tool is
+allowed with its input rewritten to produce the edited text. Answering on the permission card
+closes the tab, and closing the tab rejects. `openDiff` from a terminal `claude` uses the same
+view.
 
 **Terminals.** Each window's terminals get `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION`
 through a per-project extra terminal environment in the `project` crate (done).

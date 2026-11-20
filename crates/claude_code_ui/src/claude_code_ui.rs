@@ -1,4 +1,5 @@
 pub mod conversation;
+pub mod diff_review;
 pub mod file_picker;
 pub mod onboarding;
 pub mod panel;
@@ -102,6 +103,9 @@ actions!(
 pub fn init(cx: &mut App) {
     ClaudeCodeSettings::register(cx);
     claude_ide::init(cx);
+    cx.set_global(claude_ide::GlobalDiffReviewProvider(std::rc::Rc::new(
+        diff_review::PanelDiffProvider,
+    )));
     cx.observe_new(|workspace: &mut Workspace, _, _| register_workspace_actions(workspace))
         .detach();
 }

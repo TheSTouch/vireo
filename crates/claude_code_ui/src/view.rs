@@ -327,7 +327,10 @@ impl ClaudeCodeView {
                     cx.emit(ViewEvent::Unread);
                 }
             }
-            SessionEvent::PermissionRequested { .. } | SessionEvent::Exited => {}
+            SessionEvent::PermissionRequested { request_id } => {
+                self.open_proposed_diff(request_id.clone(), window, cx);
+            }
+            SessionEvent::Exited => {}
         }
         cx.notify();
     }
@@ -602,6 +605,104 @@ impl ClaudeCodeView {
         self.session.update(cx, |session, cx| {
             session.respond_permission(&request_id, decision, cx)
         });
+        crate::diff_review::close_matching(cx, |diff| diff.tab_name == request_id);
+    }
+
+    /// Shows an edit Claude asks permission for as a diff to review. The
+    /// answer in the diff answers the permission request.
+    fn open_proposed_diff(
+        &mut self,
+        request_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(request) = self
+            .session
+            .read(cx)
+            .conversation
+            .pending_permissions()
+            .find(|request| request.request_id == request_id)
+            .cloned()
+        else {
+            return;
+        };
+        let tool_name = request.request.tool_name.clone();
+        if !matches!(tool_name.as_str(), "Edit" | "MultiEdit" | "Write") {
+            return;
+        }
+        let Some(path) =
+            crate::diff_review::path_for_tool(&request.request.input).map(Path::to_path_buf)
+        else {
+            return;
+        };
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        let current = std::fs::read_to_string(&path).unwrap_or_default();
+        let proposed = match crate::diff_review::proposed_contents(
+            &tool_name,
+            &request.request.input,
+            &current,
+        ) {
+            Ok(proposed) => proposed,
+            Err(error) => {
+                log::debug!("not showing a diff for {tool_name}: {error:#}");
+                return;
+            }
+        };
+        let opened = crate::diff_review::ProposedDiff::open(
+            &workspace,
+            claude_ide::DiffRequest {
+                old_file_path: path.clone(),
+                new_file_path: path,
+                new_file_contents: proposed.clone(),
+                tab_name: request_id,
+            },
+            window,
+            cx,
+        );
+        let receiver = match opened {
+            Ok((_, receiver)) => receiver,
+            Err(error) => {
+                log::warn!("failed to open the proposed diff: {error:#}");
+                return;
+            }
+        };
+        cx.spawn(async move |this, cx| {
+            let Ok(outcome) = receiver.await else {
+                return;
+            };
+            this.update(cx, |this, cx| {
+                let still_pending = this
+                    .session
+                    .read(cx)
+                    .conversation
+                    .pending_permissions()
+                    .any(|pending| pending.request_id == request.request_id);
+                if !still_pending {
+                    return;
+                }
+                let answer = match outcome {
+                    claude_ide::DiffOutcome::Saved(text)
+                        if text == crate::diff_review::normalize(&proposed) =>
+                    {
+                        Answer::Allow
+                    }
+                    claude_ide::DiffOutcome::Saved(text) => {
+                        Answer::AllowWithInput(crate::diff_review::updated_input(
+                            &tool_name,
+                            &request.request.input,
+                            &current,
+                            &text,
+                        ))
+                    }
+                    claude_ide::DiffOutcome::Rejected => Answer::Deny(String::new()),
+                };
+                this.answer_permission(&request, answer, cx);
+            })
+            .ok();
+        })
+        .detach();
     }
 
     fn paste(&mut self, _: &editor::actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
