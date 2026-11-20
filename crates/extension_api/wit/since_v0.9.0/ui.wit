@@ -1,0 +1,5 @@
+/// User interface APIs for Vireo addons.
+///
+/// Everything in this interface is new in v0.9.0 and is specific to Vireo.
+interface ui {
+}

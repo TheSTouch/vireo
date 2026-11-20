@@ -8,8 +8,8 @@ use wasmtime::component::{Linker, Resource};
 
 use super::latest;
 
+// Extensions built against v0.7.0 also use these bindings.
 pub const MIN_VERSION: Version = Version::new(0, 6, 0);
-pub const MAX_VERSION: Version = Version::new(0, 7, 0);
 
 wasmtime::component::bindgen!({
     imports: {
