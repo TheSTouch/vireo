@@ -1189,6 +1189,21 @@ impl ProjectPanel {
             };
 
             let has_pasteable_content = self.has_pasteable_content(cx);
+            // "Claude Code: Add to Chat" mentions the selected entries in Claude.
+            let claude_paths: Vec<PathBuf> = if is_local && !is_root {
+                self.effective_entries()
+                    .iter()
+                    .filter_map(|selected| {
+                        let worktree = project.worktree_for_id(selected.worktree_id, cx)?;
+                        let worktree = worktree.read(cx);
+                        let entry = worktree.entry_for_id(selected.entry_id)?;
+                        (Some(entry) != worktree.root_entry())
+                            .then(|| worktree.absolutize(&entry.path))
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
             let context_menu = ContextMenu::build(window, cx, |menu, _, _| {
                 menu.context(self.focus_handle.clone()).map(|menu| {
                     if is_read_only {
@@ -1215,6 +1230,14 @@ impl ProjectPanel {
                                 menu.action("Open in Default App", Box::new(OpenWithSystem))
                             })
                             .action("Open in Terminal", Box::new(OpenInTerminal))
+                            .when(!claude_paths.is_empty(), |menu| {
+                                menu.action(
+                                    "Claude Code: Add to Chat",
+                                    Box::new(zed_actions::claude_code::AddPathsToChat {
+                                        paths: claude_paths,
+                                    }),
+                                )
+                            })
                             .when(is_markdown, |menu| {
                                 menu.action("Open Markdown Preview", Box::new(OpenMarkdownPreview))
                             })

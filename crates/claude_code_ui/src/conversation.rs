@@ -206,6 +206,8 @@ pub struct Conversation {
     pub rate_limit: Option<RateLimitInfo>,
     pub prompt_suggestion: Option<String>,
     pub running_tool: Option<String>,
+    /// The CLI said it is not signed in; the view offers to log in.
+    pub needs_login: bool,
     /// Entry indices of the blocks of a streaming message, by block index.
     streaming_blocks: HashMap<usize, usize>,
     streaming_message_id: Option<String>,
@@ -597,6 +599,9 @@ impl Conversation {
                 _ => {}
             }
         }
+        if assistant.parent_tool_use_id.is_none() {
+            self.needs_login = assistant.error.as_deref() == Some("authentication_failed");
+        }
         if let Some(error) = assistant.error {
             self.push_notice(NoticeKind::Error, error, now);
         }
@@ -693,10 +698,23 @@ impl Conversation {
             } else {
                 result.subtype.replace('_', " ")
             };
+            if is_login_error(&text) {
+                self.needs_login = true;
+            }
             self.push_notice(NoticeKind::Error, text, now);
         }
         self.finish_turn();
     }
+}
+
+/// The CLI's "not signed in" errors, such as "Invalid API key · Please run
+/// /login" or "OAuth token has expired".
+fn is_login_error(text: &str) -> bool {
+    let text = text.to_lowercase();
+    text.contains("/login")
+        || text.contains("invalid api key")
+        || text.contains("not logged in")
+        || text.contains("oauth token has expired")
 }
 
 pub fn tool_result_text(content: &Value) -> String {
@@ -939,5 +957,32 @@ mod tests {
                 (Some("u2".into()), Some("a1".into())),
             ]
         );
+    }
+
+    #[test]
+    fn authentication_errors_ask_to_log_in() {
+        let mut conversation = Conversation::default();
+        conversation.apply(
+            CliMessage::parse(
+                r#"{"type":"assistant","error":"authentication_failed","message":{"id":"m1","content":[{"type":"text","text":"Invalid API key · Please run /login"}]}}"#,
+            )
+            .unwrap(),
+            Utc::now(),
+        );
+        assert!(conversation.needs_login);
+        conversation.apply(
+            CliMessage::parse(r#"{"type":"assistant","message":{"id":"m2","content":[{"type":"text","text":"hi"}]}}"#)
+                .unwrap(),
+            Utc::now(),
+        );
+        assert!(!conversation.needs_login);
+        conversation.apply(
+            CliMessage::parse(
+                r#"{"type":"result","subtype":"success","is_error":true,"result":"Invalid API key · Please run /login"}"#,
+            )
+            .unwrap(),
+            Utc::now(),
+        );
+        assert!(conversation.needs_login);
     }
 }

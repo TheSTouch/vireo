@@ -33,8 +33,8 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.focus` | Focus input | Moves focus to the message box. | `claude_code::FocusInput` | B-4 | Done |
 | `claude-vscode.focusLastMessage` | Focus last message | Moves focus to the last message, for screen readers. | `claude_code::FocusLastMessage` | B-4 | Done |
 | `claude-vscode.blur` | Blur input | Gives focus back to the editor. | `claude_code::BlurInput` | B-4 | Done |
-| `claude-vscode.logout` | Logout | Runs the CLI's logout. | `claude_code::Logout` | B-8 | Todo |
-| `claude-vscode.terminal.open` | Open in Terminal | Runs `claude` in an integrated terminal. | `claude_code::OpenInTerminal` | B-8 | Todo |
+| `claude-vscode.logout` | Logout | Runs the CLI's logout. | `claude_code::Logout` | B-8 | Done: runs `claude auth logout` and reports in a toast |
+| `claude-vscode.terminal.open` | Open in Terminal | Runs `claude` in an integrated terminal. | `claude_code::OpenInTerminal` | B-8 | Done: a new terminal running `claude`, with `CLAUDE_CODE_SSE_PORT` so it connects to Vireo |
 | `claude-vscode.acceptProposedDiff` | Accept Proposed Changes | Accepts the whole proposed diff. | `claude_code::AcceptProposedDiff` | B-5 | Done |
 | `claude-vscode.rejectProposedDiff` | Reject Proposed Changes | Rejects the whole proposed diff. | `claude_code::RejectProposedDiff` | B-5 | Done |
 | `claude-vscode.acceptProposedHunk` | Accept Change at Cursor | Accepts the hunk under the cursor. | `claude_code::AcceptProposedHunk` | B-5 | Done |
@@ -42,14 +42,14 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.acceptProposedHunkFromBar` | Accept this change | Button on the per-hunk comment bar. | Hunk button calling `AcceptProposedHunk` | B-5 | Done |
 | `claude-vscode.rejectProposedHunkFromBar` | Reject this change | Button on the per-hunk comment bar. | Hunk button calling `RejectProposedHunk` | B-5 | Done |
 | `claude-vscode.insertAtMention` | Insert @-Mention Reference | Inserts `@file#start-end` for the editor selection into the message box. | `claude_code::InsertAtMention` | B-4 | Done |
-| `claude-vscode.addToChat` | Add to Chat | Explorer context menu: adds a file or folder as an @-mention. | `claude_code::AddToChat` | B-8 | Todo |
-| `claude-vscode.installPlugin` | Install Plugin | Installs a Claude Code plugin by name. | `claude_code::InstallPlugin` | B-8 | Todo |
+| `claude-vscode.addToChat` | Add to Chat | Explorer context menu: adds a file or folder as an @-mention. | `claude_code::AddToChat` | B-8 | Done: adds the active file; the project panel entry sends `claude_code::AddPathsToChat` with the selected entries |
+| `claude-vscode.installPlugin` | Install Plugin | Installs a Claude Code plugin by name. | `claude_code::InstallPlugin` | B-8 | Done: opens the CLI's `/plugin` manager in a terminal |
 | `claude-code.acceptProposedDiff` | Accept Proposed Changes | Terminal-mode (`/ide`) variant: accepts a diff opened by `openDiff`. | `claude_code::AcceptProposedDiff` (same action) | B-5 | Done |
 | `claude-code.rejectProposedDiff` | Reject Proposed Changes | Terminal-mode variant. | `claude_code::RejectProposedDiff` (same action) | B-5 | Done |
 | `claude-code.insertAtMentioned` | Insert At-Mentioned | Terminal mode: sends an `at_mentioned` notification to the connected CLI. | `claude_code::InsertAtMentioned` | B-3, B-4 | Done |
-| `claude-vscode.showLogs` | Show Logs | Opens the extension's log channel. | `claude_code::ShowLogs` | B-8 | Todo |
+| `claude-vscode.showLogs` | Show Logs | Opens the extension's log channel. | `claude_code::ShowLogs` | B-8 | Done: a read-only buffer with Vireo's notes and the CLI's debug output (last 5000 lines) |
 | `claude-vscode.toggleFocusView` | Toggle Focus view | Hides tool calls and activity, showing only prompts and replies. | `claude_code::ToggleFocusView` | B-4 | Done |
-| `claude-vscode.openWalkthrough` | Open Walkthrough | Opens the "Get started" walkthrough. | `claude_code::OpenWalkthrough` | B-8 | Todo |
+| `claude-vscode.openWalkthrough` | Open Walkthrough | Opens the "Get started" walkthrough. | `claude_code::OpenWalkthrough` | B-8 | Done: shows the checklist again (clears `hide_onboarding`) in an empty conversation |
 | `claude-vscode.markSessionUnread` | Mark Session as Unread | Marks the session tab unread. | `claude_code::MarkSessionUnread` | B-6 | Done |
 | `claude-vscode.renameSessionTab` | Rename Session Tab | Renames the session. | `claude_code::RenameSession` | B-6 | Done |
 | `claude-vscode.addSessionTabToGroup` | Add Session Tab to Group | Puts the session in a named group of the sessions list. | `claude_code::AddSessionToGroup` | B-6 | Done |
@@ -72,7 +72,7 @@ Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the 
 | `cmd-n` / `ctrl-n` | New Conversation | `enableNewConversationShortcut` and Claude focused | `claude_code::NewConversation` in `ClaudeCode && new_conversation_shortcut`; with the setting off the key stays New File | B-7 | Done |
 | `ctrl-alt-f` | Toggle Focus view | Claude focused | `claude_code::ToggleFocusView` in `ClaudeCode` context | B-7 | Done |
 | `cmd-shift-t` / `ctrl-shift-t` | Reopen Closed Session | `enableReopenClosedSessionShortcut` and a Claude tab was closed last | `claude_code::ReopenClosedSession` in `Workspace`, replacing `pane::ReopenClosedItem`, which it falls back to | B-7 | Done |
-| `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` in `ClaudeCode` and the Claude input | B-7, B-8 | Done: the key; dictation itself is B-8 |
+| `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` in `ClaudeCode` and the Claude input | B-7, B-8 | Partial: the key works; dictation itself is not built (see Voice input) |
 | `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4 | Done |
 | `escape` | Stop the running turn | Claude focused while running | `claude_code::Interrupt` | B-4 | Done |
 
@@ -84,20 +84,20 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | Extension setting | Type, default | Behaviour | Vireo key | Item | Status |
 | --- | --- | --- | --- | --- | --- |
 | `environmentVariables` | array of `{name, value}`, `[]` | Extra environment for the `claude` process. | `environment_variables` | B-2 | Done |
-| `useTerminal` | bool, `false` | Run Claude in the terminal instead of the native UI. | `use_terminal` | B-8 | Todo |
+| `useTerminal` | bool, `false` | Run Claude in the terminal instead of the native UI. | `use_terminal` | B-8 | Done: Focus input and Open run `claude` in a terminal; Add to Chat and Insert @-mention send `at_mentioned` to it |
 | `allowDangerouslySkipPermissions` | bool, unset (false) | Adds "Bypass permissions" to the mode menu. | `allow_dangerously_skip_permissions` | B-4 | Done |
 | `claudeProcessWrapper` | string, unset | Executable used to launch Claude; the `claude` path is passed to it. | `claude_process_wrapper` | B-2 | Done |
 | `respectGitIgnore` | bool, `true` | File search for @-mentions respects `.gitignore`. | `respect_git_ignore` | B-4 | Done |
 | `initialPermissionMode` | enum `default`, `manual`, `acceptEdits`, `plan`, `bypassPermissions`; unset | Mode of new conversations; `manual` is an alias of `default`. | `initial_permission_mode` | B-2 | Done |
-| `disableLoginPrompt` | bool, `false` | Never show the login screen. | `disable_login_prompt` | B-8 | Todo |
+| `disableLoginPrompt` | bool, `false` | Never show the login screen. | `disable_login_prompt` | B-8 | Done: hides the "not signed in" prompt |
 | `autosave` | bool, `true` | Save dirty buffers before Claude reads or writes them. | `autosave` | B-2 | Done |
 | `focusView` | bool, `false` | Start in focus view. | `focus_view` | B-4 | Done |
 | `useCtrlEnterToSend` | bool, `false` | Cmd/Ctrl+Enter sends, Enter inserts a newline. | `use_ctrl_enter_to_send` | B-4 | Done |
 | `preferredLocation` | `sidebar` or `panel`, `panel` | Where Claude opens; updated when the user opens it elsewhere. | `preferred_location` | B-4 | Partial: `Open` and the focus key follow it (`panel` = an editor tab, `sidebar` = the right dock); it is not yet updated when Claude is opened elsewhere |
-| `lockEditorGroups` | bool, `true` | Lock the editor group of a Claude tab. | `lock_editor_groups` | B-4 | Todo: read but not applied; Vireo has no locked panes yet |
+| `lockEditorGroups` | bool, `true` | Lock the editor group of a Claude tab. | `lock_editor_groups` | B-4 | Todo: accepted in settings but not applied; Vireo has no locked panes yet |
 | `enableNewConversationShortcut` | bool, `false` | Enables Cmd/Ctrl+N for a new conversation. | `enable_new_conversation_shortcut` | B-7 | Done |
 | `enableReopenClosedSessionShortcut` | bool, `true` | Enables Cmd/Ctrl+Shift+T for the last closed session. | `enable_reopen_closed_session_shortcut` | B-7 | Done |
-| `hideOnboarding` | bool, `false` | Hide the onboarding checklist. | `hide_onboarding` | B-8 | Todo |
+| `hideOnboarding` | bool, `false` | Hide the onboarding checklist. | `hide_onboarding` | B-8 | Done |
 | `attachOpenFile` | bool, `true` | Attach the open file to messages and show it as a chip. | `attach_open_file` | B-4 | Done |
 | `attachSelection` | bool, `true` | Attach the editor selection to messages and show it as a chip. | `attach_selection` | B-4 | Done |
 | `continueAfterReload` | bool, `true` | After a reload, a restored session continues the interrupted step. | `continue_after_reload` | B-6 | Done: the panel's session; a session that was in plan mode is restored without continuing |
@@ -115,12 +115,12 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | Editor title bar | Spark button "Open"; Accept / Reject buttons while a proposed diff is shown. | Claude button in the tab bar; Accept / Reject buttons in the diff view's toolbar. | B-4, B-5 | Done: Accept / Reject in the proposed diff's header |
 | Editor context menu | Accept / Reject change at cursor, in the proposed diff. | Same entries in the diff editor's context menu. | B-5 | Done |
 | Comment bar on each hunk | "Accept this change" / "Reject this change". | Per-hunk accept / reject buttons. | B-5 | Done |
-| Explorer context menu | "Claude Code: Add to Chat" on files and folders, not on roots. | Project panel context menu entry. | B-8 | Todo |
+| Explorer context menu | "Claude Code: Add to Chat" on files and folders, not on roots. | Project panel context menu entry. | B-8 | Done: "Claude Code: Add to Chat" on local files and folders other than roots, for every selected entry |
 | Session tab context menu | Mark Session as Unread, Rename Session Tab, Add Session Tab to Group. | Tab context menu and sessions list menu. | B-6 | Done: the three entries in the Claude tab's context menu; they act on the active Claude tab |
 | Activity bar / secondary side bar | Claude Code view container; a separate sessions-list view when enabled. | Right dock panel with its own sessions list. | B-4, B-6 | Done |
 | Status bar | "✻ Claude Code" item that opens Claude. | Dock button with Claude's icon. | B-4 | Done |
-| Walkthrough "Get started with Claude Code" | Steps: welcome, open Claude Code, chat with Claude, past conversations. | Onboarding checklist in the empty panel. | B-8 | Todo |
-| URI handler | `vscode://anthropic.claude-code/open?prompt=…&session=…` pre-fills a prompt or resumes a session. | `zed://claude-code/open?…` | B-8 | Todo |
+| Walkthrough "Get started with Claude Code" | Steps: welcome, open Claude Code, chat with Claude, past conversations. | Onboarding checklist in the empty panel. | B-8 | Done |
+| URI handler | `vscode://anthropic.claude-code/open?prompt=…&session=…` pre-fills a prompt or resumes a session. | `zed://claude-code/open?…` | B-8 | Done: `prompt` fills the input without sending; `session` resumes that session in a new tab |
 
 ## Chat view
 
@@ -157,9 +157,9 @@ Observed in the running extension, version 2.1.328.
 | Copy and bookmark | "Copy response" and "Bookmark response" under each reply; a bookmarks list in the header. | B-4 | Todo |
 | Sessions list | History button: search ("Search sessions…"), groups, archived sessions, rename, archive, mark unread. | B-6 | Done: `claude_code::ShowSessions` lists this folder's transcripts by last activity, with search, groups, an `archived:` filter and an archive button; rename, group and unread go through the commands above |
 | Session tabs | Several sessions open as editor tabs; unread dot; a closed tab can be reopened. | B-6 | Done |
-| Onboarding | Empty state: "Welcome to Claude Code", a short checklist, and the login choices (claude.ai account, Anthropic Console, third-party providers). | B-8 | Todo |
-| Login | Uses the CLI's login. "Sign in again", "Log in with a different account". | B-8 | Todo |
-| Voice input | Mic button in the input; dictation through the native audio-capture module, signed in to claude.ai. | B-8 | Todo |
+| Onboarding | Empty state: "Welcome to Claude Code", a short checklist, and the login choices (claude.ai account, Anthropic Console, third-party providers). | B-8 | Partial: the welcome and the checklist; login runs the CLI's own `claude auth login`, which offers the account choices |
+| Login | Uses the CLI's login. "Sign in again", "Log in with a different account". | B-8 | Done: when the CLI reports it is not signed in, the input shows "Claude Code is not signed in" with Log in (`claude auth login` in a terminal); Logout, then Log in, switches accounts |
+| Voice input | Mic button in the input; dictation through the native audio-capture module, signed in to claude.ai. | B-8 | Partial: `claude_code::ToggleDictation` and its key exist but only say dictation is not available yet; no audio capture or speech-to-text yet |
 
 **Where sessions live (B-6).** The conversations themselves are the CLI's transcripts,
 `~/.claude/projects/<folder>/<session>.jsonl` (`CLAUDE_CONFIG_DIR` is honoured), so sessions

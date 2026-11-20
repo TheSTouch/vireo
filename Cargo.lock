@@ -3062,6 +3062,7 @@ dependencies = [
  "buffer_diff",
  "chrono",
  "claude_ide",
+ "collections",
  "editor",
  "fs",
  "futures 0.3.34",
@@ -3079,6 +3080,7 @@ dependencies = [
  "serde",
  "serde_json",
  "settings",
+ "task",
  "tempfile",
  "text",
  "theme",
@@ -3086,6 +3088,7 @@ dependencies = [
  "ui",
  "util",
  "workspace",
+ "zed_actions",
 ]
 
 [[package]]

@@ -1,5 +1,6 @@
 pub mod conversation;
 pub mod diff_review;
+pub mod extras;
 pub mod file_picker;
 pub mod onboarding;
 pub mod panel;
@@ -129,7 +130,11 @@ fn register_workspace_actions(workspace: &mut Workspace) {
             workspace.toggle_panel_focus::<ClaudeCodePanel>(window, cx);
         })
         .register_action(|workspace, _: &Open, window, cx| {
-            open_preferred(workspace, window, cx);
+            if ClaudeCodeSettings::get_global(cx).use_terminal {
+                extras::open_in_terminal(workspace, window, cx);
+            } else {
+                open_preferred(workspace, window, cx);
+            }
         })
         .register_action(|workspace, _: &OpenInNewTab, window, cx| {
             open(workspace, Location::NewTab, None, window, cx);
@@ -142,6 +147,35 @@ fn register_workspace_actions(workspace: &mut Workspace) {
         })
         .register_action(|workspace, _: &OpenInNewWindow, _, cx| {
             open_in_new_window(workspace, cx);
+        })
+        .register_action(|workspace, _: &AddToChat, window, cx| {
+            extras::add_active_file_to_chat(workspace, window, cx);
+        })
+        .register_action(
+            |workspace, action: &zed_actions::claude_code::AddPathsToChat, window, cx| {
+                extras::add_paths_to_chat(workspace, action.paths.clone(), window, cx);
+            },
+        )
+        .register_action(|workspace, _: &Login, window, cx| {
+            extras::login(workspace, window, cx);
+        })
+        .register_action(|workspace, _: &Logout, _, cx| {
+            extras::logout(workspace, cx);
+        })
+        .register_action(|workspace, _: &ShowLogs, window, cx| {
+            extras::show_logs(workspace, window, cx);
+        })
+        .register_action(|workspace, _: &OpenInTerminal, window, cx| {
+            extras::open_in_terminal(workspace, window, cx);
+        })
+        .register_action(|workspace, _: &InstallPlugin, window, cx| {
+            extras::install_plugin(workspace, window, cx);
+        })
+        .register_action(|workspace, _: &OpenWalkthrough, window, cx| {
+            extras::open_walkthrough(workspace, window, cx);
+        })
+        .register_action(|workspace, _: &ToggleDictation, _, cx| {
+            extras::toggle_dictation(workspace, cx);
         })
         .register_action(|workspace, _: &NewConversation, window, cx| {
             if let Some(panel) = workspace.focus_panel::<ClaudeCodePanel>(window, cx) {
@@ -175,6 +209,24 @@ fn focus_input(
         return;
     }
     open_preferred(workspace, window, cx);
+}
+
+/// Handles `zed://claude-code/open?prompt=…&session=…`: resumes the session
+/// when one is given, and fills the prompt in without sending it.
+pub fn open_from_uri(
+    workspace: &mut Workspace,
+    prompt: Option<String>,
+    session: Option<String>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let view = match session {
+        Some(session_id) => open(workspace, Location::NewTab, Some(session_id), window, cx),
+        None => open_preferred(workspace, window, cx),
+    };
+    if let (Some(view), Some(prompt)) = (view, prompt) {
+        view.update(cx, |view, cx| view.set_input_text(&prompt, window, cx));
+    }
 }
 
 fn open_session_ids(workspace: &Workspace, cx: &App) -> Vec<String> {
@@ -365,6 +417,14 @@ fn insert_at_mention(
         return;
     };
     let rows = (!selection.is_empty()).then_some(selection.rows);
+    if ClaudeCodeSettings::get_global(cx).use_terminal {
+        // Terminal mode: mention the selection in the connected `claude`.
+        let workspace_entity = cx.entity();
+        if let Some(ide) = claude_ide::ClaudeIde::for_workspace(&workspace_entity, cx) {
+            ide.read(cx).send_at_mention(&selection.file_path, rows);
+        }
+        return;
+    }
     let view = active_view(workspace, cx).or_else(|| open_preferred(workspace, window, cx));
     if let Some(view) = view {
         view.update(cx, |view, cx| {

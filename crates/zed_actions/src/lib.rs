@@ -416,6 +416,23 @@ pub mod text_finder {
     );
 }
 
+pub mod claude_code {
+    use gpui::Action;
+    use schemars::JsonSchema;
+    use serde::Deserialize;
+    use std::path::PathBuf;
+
+    /// Adds files or folders to the Claude Code conversation as @-mentions
+    /// ("Claude Code: Add to Chat" in the project panel).
+    #[derive(Clone, Debug, Default, PartialEq, Deserialize, JsonSchema, Action)]
+    #[action(namespace = claude_code)]
+    #[serde(deny_unknown_fields)]
+    pub struct AddPathsToChat {
+        #[serde(default)]
+        pub paths: Vec<PathBuf>,
+    }
+}
+
 pub mod project_panel {
     use gpui::actions;
 

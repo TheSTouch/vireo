@@ -1545,6 +1545,49 @@ impl ClaudeCodeView {
                         ),
                 )
             })
+            .when(
+                self.session.read(cx).conversation.needs_login
+                    && !ClaudeCodeSettings::get_global(cx).disable_login_prompt,
+                |this| {
+                    this.child(
+                        h_flex()
+                            .px_2()
+                            .py_1()
+                            .gap_2()
+                            .justify_between()
+                            .border_b_1()
+                            .border_color(colors.border_variant)
+                            .child(
+                                Label::new("Claude Code is not signed in.")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Warning),
+                            )
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child(
+                                        Button::new("log-in", "Log in")
+                                            .label_size(LabelSize::XSmall)
+                                            .style(ButtonStyle::Filled)
+                                            .on_click(|_, window, cx| {
+                                                window
+                                                    .dispatch_action(crate::Login.boxed_clone(), cx)
+                                            }),
+                                    )
+                                    .child(
+                                        IconButton::new("dismiss-login", IconName::Close)
+                                            .icon_size(IconSize::XSmall)
+                                            .on_click(cx.listener(|this, _, _, cx| {
+                                                this.session.update(cx, |session, _| {
+                                                    session.conversation.needs_login = false
+                                                });
+                                                cx.notify();
+                                            })),
+                                    ),
+                            ),
+                    )
+                },
+            )
             .children(self.render_chips(cx))
             .child(
                 div()

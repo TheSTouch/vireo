@@ -60,6 +60,12 @@ pub enum OpenRequestKind {
     AgentPanel {
         external_source_prompt: Option<ExternalSourcePrompt>,
     },
+    /// `zed://claude-code/open?prompt=…&session=…`: opens Claude Code with a
+    /// prompt filled in, or resumes a session.
+    ClaudeCode {
+        prompt: Option<String>,
+        session: Option<String>,
+    },
     InstallSkill {
         /// Full `SKILL.md` contents embedded in a `zed://skill` share link.
         content: String,
@@ -96,6 +102,11 @@ impl std::fmt::Debug for OpenRequestKind {
             } => f
                 .debug_struct("AgentPanel")
                 .field("external_source_prompt", external_source_prompt)
+                .finish(),
+            Self::ClaudeCode { prompt, session } => f
+                .debug_struct("ClaudeCode")
+                .field("prompt_len", &prompt.as_ref().map(String::len))
+                .field("session", session)
                 .finish(),
             Self::InstallSkill { content } => f
                 .debug_struct("InstallSkill")
@@ -174,6 +185,8 @@ impl OpenRequest {
                 });
             } else if url.starts_with(agent_skills::SKILL_SHARE_LINK_PREFIX) {
                 this.parse_skill_install_url(&url)?
+            } else if let Some(path) = url.strip_prefix("zed://claude-code") {
+                this.parse_claude_code_url(path);
             } else if let Some(agent_path) = url.strip_prefix("zed://agent") {
                 this.parse_agent_url(agent_path)
             } else if url == "zed://" || url == "zed://open" || url == "zed://open/" {
@@ -225,6 +238,21 @@ impl OpenRequest {
             self.open_paths
                 .push(url_path_to_path(&decoded, PathStyle::local()).to_owned())
         }
+    }
+
+    fn parse_claude_code_url(&mut self, path: &str) {
+        // Format: "", "/open" or either followed by "?prompt=<text>&session=<id>".
+        let query = path.split_once('?').map(|(_, query)| query).unwrap_or("");
+        let mut prompt = None;
+        let mut session = None;
+        for (key, value) in url::form_urlencoded::parse(query.as_bytes()) {
+            match key.as_ref() {
+                "prompt" if !value.is_empty() => prompt = Some(value.into_owned()),
+                "session" if !value.is_empty() => session = Some(value.into_owned()),
+                _ => {}
+            }
+        }
+        self.kind = Some(OpenRequestKind::ClaudeCode { prompt, session });
     }
 
     fn parse_agent_url(&mut self, agent_path: &str) {
@@ -1709,6 +1737,30 @@ mod tests {
                 );
             }
             _ => panic!("Expected AgentPanel kind"),
+        }
+    }
+
+    #[gpui::test]
+    fn test_parse_claude_code_url(cx: &mut TestAppContext) {
+        let _app_state = init_test(cx);
+        let request = cx.update(|cx| {
+            OpenRequest::parse(
+                RawOpenRequest {
+                    urls: vec![
+                        "zed://claude-code/open?prompt=fix%20the%20bug&session=abc-123".into(),
+                    ],
+                    ..Default::default()
+                },
+                cx,
+            )
+            .unwrap()
+        });
+        match request.kind {
+            Some(OpenRequestKind::ClaudeCode { prompt, session }) => {
+                assert_eq!(prompt.as_deref(), Some("fix the bug"));
+                assert_eq!(session.as_deref(), Some("abc-123"));
+            }
+            _ => panic!("Expected ClaudeCode kind"),
         }
     }
 
