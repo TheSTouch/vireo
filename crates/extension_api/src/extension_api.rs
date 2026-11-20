@@ -304,6 +304,26 @@ pub trait Extension: Send + Sync {
     ) -> Result<Vec<addon::ui::TreeItem>, String> {
         Err(format!("tree view `{view_id}` is not implemented"))
     }
+
+    /// Returns the content of the custom view `view_id`, usually built with
+    /// [`addon::ui::Element`].
+    ///
+    /// Called when the view opens, after each of its events, and after
+    /// [`addon::ui::refresh_view`].
+    fn render_view(&mut self, view_id: &str) -> Result<addon::ui::ViewTree, String> {
+        Err(format!("view `{view_id}` is not implemented"))
+    }
+
+    /// Handles an event from an element of a custom view. The view is rendered
+    /// again afterwards.
+    fn handle_view_event(
+        &mut self,
+        _view_id: &str,
+        _element_id: &str,
+        _event: addon::ui::ViewEvent,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Registers the provided type as a Zed extension.
@@ -592,6 +612,18 @@ impl wit::Guest for Component {
         parent: Option<String>,
     ) -> Result<Vec<addon::ui::TreeItem>, String> {
         extension().tree_children(&view_id, parent)
+    }
+
+    fn render_view(view_id: String) -> Result<addon::ui::ViewTree, String> {
+        extension().render_view(&view_id)
+    }
+
+    fn handle_view_event(
+        view_id: String,
+        element_id: String,
+        event: addon::ui::ViewEvent,
+    ) -> Result<(), String> {
+        extension().handle_view_event(&view_id, &element_id, event)
     }
 }
 

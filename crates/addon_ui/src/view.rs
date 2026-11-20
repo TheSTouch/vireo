@@ -2,12 +2,16 @@ use std::str::FromStr as _;
 use std::sync::Arc;
 
 use collections::{HashMap, HashSet};
-use extension::{AddonTreeItem, AddonViewKind};
+use editor::{Editor, EditorEvent};
+use extension::{AddonElementKind, AddonTreeItem, AddonViewEvent, AddonViewKind, AddonViewTree};
 use gpui::{
-    App, Context, DismissEvent, Entity, FocusHandle, Focusable, IntoElement, MouseDownEvent,
-    Pixels, Point, Render, Subscription, Window, anchored, deferred,
+    App, Context, DismissEvent, Entity, EventEmitter, FocusHandle, Focusable, IntoElement,
+    MouseDownEvent, Pixels, Point, Render, Subscription, Window, anchored, deferred,
 };
-use ui::{ContextMenu, IconName, ListItem, ListItemSpacing, prelude::*};
+use ui::{
+    Checkbox, ContextMenu, Divider, IconName, ListItem, ListItemSpacing, ToggleState, prelude::*,
+};
+use workspace::{Item, Workspace};
 
 use crate::{AddonRegistry, AddonRegistryEvent, AddonViewKey, RunCommand};
 
@@ -18,9 +22,25 @@ pub struct AddonView {
     registry: Entity<AddonRegistry>,
     focus_handle: FocusHandle,
     tree: TreeState,
+    custom: CustomState,
     error: Option<SharedString>,
     context_menu: Option<(Entity<ContextMenu>, Point<Pixels>, Subscription)>,
     _registry_subscription: Subscription,
+}
+
+/// How deeply custom view elements may nest. Deeper elements are not shown,
+/// which also stops cycles in a malformed view tree.
+const MAX_ELEMENT_DEPTH: usize = 64;
+
+#[derive(Default)]
+struct CustomState {
+    tree: Option<AddonViewTree>,
+    /// The editors of text inputs, by element ID.
+    text_inputs: HashMap<String, (Entity<Editor>, Subscription)>,
+    /// The value each text input last took from the addon. Editors report
+    /// edits after the fact, so an edit that yields this value is the view's
+    /// own and is not sent back to the addon.
+    input_values: HashMap<String, String>,
 }
 
 #[derive(Default)]
@@ -51,6 +71,7 @@ impl AddonView {
             registry,
             focus_handle: cx.focus_handle(),
             tree: TreeState::default(),
+            custom: CustomState::default(),
             error: None,
             context_menu: None,
             _registry_subscription: subscription,
@@ -64,7 +85,7 @@ impl AddonView {
     }
 
     /// Drops everything cached and asks the addon again.
-    pub fn refresh(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.error = None;
         match self.kind {
             AddonViewKind::Tree => {
@@ -75,8 +96,239 @@ impl AddonView {
                     self.load_children(Some(parent), cx);
                 }
             }
+            AddonViewKind::Custom => self.render_custom(window, cx),
         }
         cx.notify();
+    }
+
+    fn render_custom(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let task = self.registry.read(cx).render_view(&self.key, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(tree) => this.apply_view_tree(tree, window, cx),
+                    Err(error) => {
+                        log::error!("addon view {:?} failed: {error:#}", this.key);
+                        this.error = Some(format!("{error:#}").into());
+                    }
+                }
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    /// The content of a custom view, as last rendered by the addon.
+    pub fn view_tree(&self) -> Option<&AddonViewTree> {
+        self.custom.tree.as_ref()
+    }
+
+    /// The editor of a custom view's text input.
+    pub fn text_input(&self, element_id: &str) -> Option<Entity<Editor>> {
+        self.custom
+            .text_inputs
+            .get(element_id)
+            .map(|(editor, _)| editor.clone())
+    }
+
+    fn apply_view_tree(
+        &mut self,
+        tree: AddonViewTree,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut text_inputs = std::mem::take(&mut self.custom.text_inputs);
+        for element in &tree.elements {
+            let AddonElementKind::TextInput { value, placeholder } = &element.kind else {
+                continue;
+            };
+            let (editor, _) = text_inputs
+                .entry(element.id.clone())
+                .or_insert_with(|| self.new_text_input(element.id.clone(), window, cx));
+            let editor = editor.clone();
+            editor.update(cx, |editor, cx| {
+                editor.set_placeholder_text(placeholder.as_deref().unwrap_or(""), window, cx);
+                // Keep what the user is typing; only replace the text of inputs
+                // they are not editing.
+                if !editor.focus_handle(cx).is_focused(window) && editor.text(cx) != *value {
+                    self.custom
+                        .input_values
+                        .insert(element.id.clone(), value.clone());
+                    editor.set_text(value.as_str(), window, cx);
+                }
+            });
+        }
+        text_inputs.retain(|id, _| {
+            tree.elements.iter().any(|element| {
+                element.id == *id && matches!(element.kind, AddonElementKind::TextInput { .. })
+            })
+        });
+        self.custom
+            .input_values
+            .retain(|id, _| text_inputs.contains_key(id));
+        self.custom.text_inputs = text_inputs;
+        self.custom.tree = Some(tree);
+    }
+
+    fn new_text_input(
+        &mut self,
+        element_id: String,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (Entity<Editor>, Subscription) {
+        let editor = cx.new(|cx| Editor::single_line(window, cx));
+        let subscription =
+            cx.subscribe_in(&editor, window, move |this, editor, event, window, cx| {
+                if !matches!(event, EditorEvent::BufferEdited) {
+                    return;
+                }
+                let text = editor.read(cx).text(cx);
+                if this.custom.input_values.get(&element_id) == Some(&text) {
+                    return;
+                }
+                this.custom.input_values.remove(&element_id);
+                this.send_event(element_id.clone(), AddonViewEvent::Change(text), window, cx);
+            });
+        (editor, subscription)
+    }
+
+    /// Sends an event to the addon, then renders the view again.
+    pub fn send_event(
+        &mut self,
+        element_id: String,
+        event: AddonViewEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let task = self
+            .registry
+            .read(cx)
+            .handle_view_event(&self.key, element_id, event, cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = task.await;
+            this.update_in(cx, |this, window, cx| {
+                if let Err(error) = result {
+                    log::error!(
+                        "addon view {:?} failed to handle an event: {error:#}",
+                        this.key
+                    );
+                    this.error = Some(format!("{error:#}").into());
+                }
+                this.render_custom(window, cx);
+            })
+            .ok();
+        })
+        .detach();
+    }
+
+    fn render_element(
+        &self,
+        index: u32,
+        depth: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let Some(element) = self
+            .custom
+            .tree
+            .as_ref()
+            .and_then(|tree| tree.elements.get(index as usize))
+        else {
+            return div().into_any_element();
+        };
+        if depth > MAX_ELEMENT_DEPTH {
+            return div().into_any_element();
+        }
+        let element_id =
+            SharedString::from(format!("addon-element-{}-{}", self.key.view_id, element.id));
+        let children = |this: &Self, window: &mut Window, cx: &mut Context<Self>| {
+            element
+                .children
+                .iter()
+                .map(|child| this.render_element(*child, depth + 1, window, cx))
+                .collect::<Vec<_>>()
+        };
+        match &element.kind {
+            AddonElementKind::Column => v_flex()
+                .gap_1()
+                .children(children(self, window, cx))
+                .into_any_element(),
+            AddonElementKind::Row => h_flex()
+                .gap_1()
+                .items_center()
+                .children(children(self, window, cx))
+                .into_any_element(),
+            AddonElementKind::Scroll => v_flex()
+                .id(element_id)
+                .size_full()
+                .gap_1()
+                .overflow_y_scroll()
+                .children(children(self, window, cx))
+                .into_any_element(),
+            AddonElementKind::List => v_flex()
+                .gap_0p5()
+                .children(children(self, window, cx))
+                .into_any_element(),
+            AddonElementKind::Label(text) => Label::new(text.clone()).into_any_element(),
+            AddonElementKind::Icon(name) => {
+                Icon::new(IconName::from_str(name).unwrap_or(IconName::Blocks))
+                    .size(IconSize::Small)
+                    .color(Color::Muted)
+                    .into_any_element()
+            }
+            AddonElementKind::Button(label) => {
+                let id = element.id.clone();
+                Button::new(element_id, label.clone())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.send_event(id.clone(), AddonViewEvent::Click, window, cx);
+                    }))
+                    .into_any_element()
+            }
+            AddonElementKind::TextInput { .. } => {
+                let Some((editor, _)) = self.custom.text_inputs.get(&element.id) else {
+                    return div().into_any_element();
+                };
+                let id = element.id.clone();
+                h_flex()
+                    .id(element_id)
+                    .px_1()
+                    .py_0p5()
+                    .border_1()
+                    .rounded_sm()
+                    .border_color(cx.theme().colors().border)
+                    .on_action(cx.listener(move |this, _: &menu::Confirm, window, cx| {
+                        let Some(editor) = this.text_input(&id) else {
+                            return;
+                        };
+                        let text = editor.read(cx).text(cx);
+                        this.send_event(id.clone(), AddonViewEvent::Submit(text), window, cx);
+                    }))
+                    .child(editor.clone())
+                    .into_any_element()
+            }
+            AddonElementKind::Checkbox { label, checked } => {
+                let id = element.id.clone();
+                let view = cx.entity().downgrade();
+                Checkbox::new(element_id, ToggleState::from(*checked))
+                    .label(label.clone())
+                    .on_click(move |state, window, cx| {
+                        let checked = state.selected();
+                        view.update(cx, |this, cx| {
+                            this.send_event(
+                                id.clone(),
+                                AddonViewEvent::Toggle(checked),
+                                window,
+                                cx,
+                            );
+                        })
+                        .ok();
+                    })
+                    .into_any_element()
+            }
+            AddonElementKind::Divider => Divider::horizontal().into_any_element(),
+        }
     }
 
     fn load_children(&mut self, parent: Option<Arc<str>>, cx: &mut Context<Self>) {
@@ -248,13 +500,22 @@ impl Focusable for AddonView {
 }
 
 impl Render for AddonView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let rows: Vec<AnyElement> = match self.kind {
             AddonViewKind::Tree => self
                 .visible_items()
                 .into_iter()
                 .map(|(depth, item)| self.render_tree_item(depth, item, cx))
                 .collect(),
+            AddonViewKind::Custom if self.custom.tree.is_some() => {
+                vec![
+                    div()
+                        .p_2()
+                        .child(self.render_element(0, 0, window, cx))
+                        .into_any_element(),
+                ]
+            }
+            AddonViewKind::Custom => Vec::new(),
         };
         v_flex()
             .id(SharedString::from(format!(
@@ -276,4 +537,72 @@ impl Render for AddonView {
                 deferred(anchored().position(*position).child(menu.clone())).with_priority(3)
             }))
     }
+}
+
+/// An editor tab showing an addon's custom view.
+pub struct AddonViewItem {
+    view: Entity<AddonView>,
+    title: SharedString,
+}
+
+impl AddonViewItem {
+    pub fn view(&self) -> &Entity<AddonView> {
+        &self.view
+    }
+}
+
+pub enum AddonViewItemEvent {}
+
+impl EventEmitter<AddonViewItemEvent> for AddonViewItem {}
+
+impl Item for AddonViewItem {
+    type Event = AddonViewItemEvent;
+
+    fn tab_content_text(&self, _detail: usize, _cx: &App) -> SharedString {
+        self.title.clone()
+    }
+
+    fn tab_icon(&self, _window: &Window, _cx: &App) -> Option<Icon> {
+        Some(Icon::new(IconName::Blocks))
+    }
+}
+
+impl Focusable for AddonViewItem {
+    fn focus_handle(&self, cx: &App) -> FocusHandle {
+        self.view.focus_handle(cx)
+    }
+}
+
+impl Render for AddonViewItem {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .size_full()
+            .bg(cx.theme().colors().editor_background)
+            .child(self.view.clone())
+    }
+}
+
+/// Opens a custom view in an editor tab, or activates the tab showing it.
+pub(crate) fn open_view_tab(
+    workspace: &mut Workspace,
+    key: AddonViewKey,
+    title: String,
+    registry: Entity<AddonRegistry>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let existing = workspace
+        .items_of_type::<AddonViewItem>(cx)
+        .find(|item| item.read(cx).view.read(cx).key() == &key);
+    if let Some(item) = existing {
+        item.update(cx, |item, _| item.title = title.into());
+        workspace.activate_item(&item, true, true, window, cx);
+        return;
+    }
+    let view = cx.new(|cx| AddonView::new(key, AddonViewKind::Custom, registry, window, cx));
+    let item = cx.new(|_| AddonViewItem {
+        view,
+        title: title.into(),
+    });
+    workspace.add_item_to_active_pane(Box::new(item), None, true, window, cx);
 }

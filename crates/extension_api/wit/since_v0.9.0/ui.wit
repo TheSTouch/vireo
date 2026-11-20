@@ -32,6 +32,65 @@ interface ui {
     }
 
     /// Asks every place that shows the view to ask the addon for its content
-    /// again: `tree-children` for tree views.
+    /// again: `tree-children` for tree views, `render-view` for custom views.
     refresh-view: func(view-id: string);
+
+    /// The state of a text input.
+    record text-input-state {
+        value: string,
+        placeholder: option<string>,
+    }
+
+    /// The state of a checkbox.
+    record checkbox-state {
+        label: string,
+        checked: bool,
+    }
+
+    /// What an element of a custom view is.
+    variant element-kind {
+        /// Lays out its children vertically.
+        column,
+        /// Lays out its children horizontally.
+        row,
+        /// A column that scrolls vertically.
+        scroll,
+        /// A column of rows with list spacing.
+        %list,
+        label(string),
+        /// The name of a Vireo icon, such as `folder`.
+        icon(string),
+        /// A button with this label. Clicking it sends `click`.
+        button(string),
+        /// A single-line text input. Editing it sends `change`; Enter sends `submit`.
+        text-input(text-input-state),
+        /// Toggling it sends `toggle`.
+        checkbox(checkbox-state),
+        divider,
+    }
+
+    /// An element of a custom view.
+    record element {
+        /// The element ID, unique within the view, passed back with its events.
+        id: string,
+        kind: element-kind,
+        /// Indices of the element's children in `view-tree.elements`.
+        children: list<u32>,
+    }
+
+    /// The content of a custom view. The first element is the root.
+    record view-tree {
+        elements: list<element>,
+    }
+
+    /// What happened to an element of a custom view.
+    variant view-event {
+        click,
+        change(string),
+        submit(string),
+        toggle(bool),
+    }
+
+    /// Opens a custom view in an editor tab, or activates the tab showing it.
+    open-view-tab: func(view-id: string, title: string);
 }

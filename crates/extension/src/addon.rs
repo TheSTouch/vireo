@@ -75,6 +75,62 @@ pub enum AddonViewKind {
     /// A tree whose items the addon returns from `tree-children`.
     #[default]
     Tree,
+    /// Elements the addon returns from `render-view`.
+    Custom,
+}
+
+/// The content of a custom view: a flat list of elements whose first element
+/// is the root. Children refer to elements by index.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct AddonViewTree {
+    pub elements: Vec<AddonElement>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AddonElement {
+    /// The element ID, unique within the view, passed back with its events.
+    pub id: String,
+    pub kind: AddonElementKind,
+    /// Indices of the element's children in [`AddonViewTree::elements`].
+    pub children: Vec<u32>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum AddonElementKind {
+    /// Lays out its children vertically.
+    Column,
+    /// Lays out its children horizontally.
+    Row,
+    /// A column that scrolls vertically.
+    Scroll,
+    /// A column of rows with list spacing.
+    List,
+    Label(String),
+    /// The name of a Vireo icon.
+    Icon(String),
+    /// A button with this label; clicking it sends a click event.
+    Button(String),
+    /// A single-line text input; editing it sends change events, and Enter
+    /// sends a submit event.
+    TextInput {
+        value: String,
+        placeholder: Option<String>,
+    },
+    /// Toggling it sends a toggle event.
+    Checkbox {
+        label: String,
+        checked: bool,
+    },
+    Divider,
+}
+
+/// What happened to an element of a custom view.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum AddonViewEvent {
+    Click,
+    Change(String),
+    Submit(String),
+    Toggle(bool),
 }
 
 /// A `[[panels.<id>.context_menu]]` entry.
@@ -136,6 +192,10 @@ pub trait ExtensionAddonProxy: Send + Sync + 'static {
     /// Asks every place that shows one of the addon's views to ask the addon
     /// for its content again.
     fn refresh_view(&self, extension_id: Arc<str>, view_id: Arc<str>, cx: &mut App);
+
+    /// Opens one of the addon's custom views in an editor tab of the active
+    /// workspace, or activates the tab that already shows it.
+    fn open_view_tab(&self, extension_id: Arc<str>, view_id: Arc<str>, title: String, cx: &mut App);
 }
 
 impl ExtensionAddonProxy for ExtensionHostProxy {
@@ -172,6 +232,19 @@ impl ExtensionAddonProxy for ExtensionHostProxy {
             return;
         };
         proxy.refresh_view(extension_id, view_id, cx)
+    }
+
+    fn open_view_tab(
+        &self,
+        extension_id: Arc<str>,
+        view_id: Arc<str>,
+        title: String,
+        cx: &mut App,
+    ) {
+        let Some(proxy) = self.addon_proxy() else {
+            return;
+        };
+        proxy.open_view_tab(extension_id, view_id, title, cx)
     }
 }
 
@@ -219,6 +292,10 @@ mod tests {
             command = "open-item"
             when = "file"
 
+            [panels.custom]
+            title = "Custom"
+            view = "custom"
+
             [panels.minimal]
             title = "Minimal"
             "#,
@@ -236,6 +313,7 @@ mod tests {
                 when: Some("file".into()),
             }]
         );
+        assert_eq!(manifest.addon.panels["custom"].view, AddonViewKind::Custom);
         let minimal = &manifest.addon.panels["minimal"];
         assert_eq!(minimal.dock, AddonDock::Left);
         assert!(minimal.context_menu.is_empty());

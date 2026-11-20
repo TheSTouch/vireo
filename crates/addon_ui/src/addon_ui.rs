@@ -8,7 +8,7 @@ mod view;
 
 pub use panel::{AddonPanel, PANEL_SLOTS, TogglePanel};
 pub use status_bar::AddonStatusItems;
-pub use view::AddonView;
+pub use view::{AddonView, AddonViewItem};
 
 use std::sync::Arc;
 
@@ -18,8 +18,8 @@ use command_palette_hooks::{
     CommandPaletteExtraCommand, CommandPaletteFilter, GlobalCommandPaletteExtraCommands,
 };
 use extension::{
-    AddonContextMenuEntry, AddonPanelManifestEntry, AddonStatusItem, AddonTreeItem, Extension,
-    ExtensionAddonProxy, ExtensionHostProxy,
+    AddonContextMenuEntry, AddonPanelManifestEntry, AddonStatusItem, AddonTreeItem, AddonViewEvent,
+    AddonViewTree, Extension, ExtensionAddonProxy, ExtensionHostProxy,
 };
 use gpui::{
     Action, App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task,
@@ -281,6 +281,40 @@ impl AddonRegistry {
             .collect()
     }
 
+    /// Asks an addon for the content of a custom view.
+    pub fn render_view(&self, key: &AddonViewKey, cx: &App) -> Task<Result<AddonViewTree>> {
+        let Some(extension) = self.addon(&key.extension_id) else {
+            return Task::ready(Err(anyhow::anyhow!(
+                "no addon with ID `{}` is loaded",
+                key.extension_id
+            )));
+        };
+        let view_id = key.view_id.clone();
+        cx.background_spawn(async move { extension.addon_render_view(view_id).await })
+    }
+
+    /// Sends an event from an element of a custom view to its addon.
+    pub fn handle_view_event(
+        &self,
+        key: &AddonViewKey,
+        element_id: String,
+        event: AddonViewEvent,
+        cx: &App,
+    ) -> Task<Result<()>> {
+        let Some(extension) = self.addon(&key.extension_id) else {
+            return Task::ready(Err(anyhow::anyhow!(
+                "no addon with ID `{}` is loaded",
+                key.extension_id
+            )));
+        };
+        let view_id = key.view_id.clone();
+        cx.background_spawn(async move {
+            extension
+                .addon_handle_view_event(view_id, element_id, event)
+                .await
+        })
+    }
+
     /// Asks an addon for the children of a tree view item.
     pub fn tree_children(
         &self,
@@ -418,6 +452,21 @@ impl ExtensionAddonProxy for AddonProxy {
                 registry.refresh_view(AddonViewKey::new(extension_id, view_id), cx)
             });
         }
+    }
+
+    fn open_view_tab(
+        &self,
+        extension_id: Arc<str>,
+        view_id: Arc<str>,
+        title: String,
+        cx: &mut App,
+    ) {
+        workspace::with_active_or_new_workspace(cx, move |workspace, window, cx| {
+            if let Some(registry) = AddonRegistry::global(cx) {
+                let key = AddonViewKey::new(extension_id, view_id);
+                view::open_view_tab(workspace, key, title, registry, window, cx);
+            }
+        });
     }
 }
 

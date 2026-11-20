@@ -8,8 +8,9 @@
 use crate::wasm_host::WasmState;
 use anyhow::Result;
 use extension::{
-    AddonStatusItem, AddonTreeItem, ExtensionAddonProxy as _, ExtensionHostProxy,
-    KeyValueStoreDelegate, ProjectDelegate, WorktreeDelegate,
+    AddonElement, AddonElementKind, AddonStatusItem, AddonTreeItem, AddonViewEvent, AddonViewTree,
+    ExtensionAddonProxy as _, ExtensionHostProxy, KeyValueStoreDelegate, ProjectDelegate,
+    WorktreeDelegate,
 };
 use gpui::{App, BackgroundExecutor};
 use semver::Version;
@@ -269,6 +270,57 @@ impl ui::Host for WasmState {
         })
         .await
     }
+
+    async fn open_view_tab(&mut self, view_id: String, title: String) -> wasmtime::Result<()> {
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.open_view_tab(extension_id, view_id.into(), title, cx)
+        })
+        .await
+    }
+}
+
+impl From<ui::ViewTree> for AddonViewTree {
+    fn from(tree: ui::ViewTree) -> Self {
+        Self {
+            elements: tree
+                .elements
+                .into_iter()
+                .map(|element| AddonElement {
+                    id: element.id,
+                    kind: match element.kind {
+                        ui::ElementKind::Column => AddonElementKind::Column,
+                        ui::ElementKind::Row => AddonElementKind::Row,
+                        ui::ElementKind::Scroll => AddonElementKind::Scroll,
+                        ui::ElementKind::List => AddonElementKind::List,
+                        ui::ElementKind::Label(text) => AddonElementKind::Label(text),
+                        ui::ElementKind::Icon(name) => AddonElementKind::Icon(name),
+                        ui::ElementKind::Button(label) => AddonElementKind::Button(label),
+                        ui::ElementKind::TextInput(input) => AddonElementKind::TextInput {
+                            value: input.value,
+                            placeholder: input.placeholder,
+                        },
+                        ui::ElementKind::Checkbox(checkbox) => AddonElementKind::Checkbox {
+                            label: checkbox.label,
+                            checked: checkbox.checked,
+                        },
+                        ui::ElementKind::Divider => AddonElementKind::Divider,
+                    },
+                    children: element.children,
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<AddonViewEvent> for ui::ViewEvent {
+    fn from(event: AddonViewEvent) -> Self {
+        match event {
+            AddonViewEvent::Click => Self::Click,
+            AddonViewEvent::Change(text) => Self::Change(text),
+            AddonViewEvent::Submit(text) => Self::Submit(text),
+            AddonViewEvent::Toggle(checked) => Self::Toggle(checked),
+        }
+    }
 }
 
 impl From<ui::TreeItem> for AddonTreeItem {
@@ -327,6 +379,41 @@ impl super::Extension {
                 .call_tree_children(store, view_id, parent)
                 .await?
                 .map(|items| items.into_iter().map(Into::into).collect())),
+            _ => Ok(Err(
+                "addon views require extension API v0.9.0 or later".to_string()
+            )),
+        }
+    }
+
+    pub async fn call_render_view(
+        &self,
+        store: &mut wasmtime::Store<WasmState>,
+        view_id: &str,
+    ) -> wasmtime::Result<Result<AddonViewTree, String>> {
+        match self {
+            super::Extension::V0_9_0(extension) => Ok(extension
+                .call_render_view(store, view_id)
+                .await?
+                .map(Into::into)),
+            _ => Ok(Err(
+                "addon views require extension API v0.9.0 or later".to_string()
+            )),
+        }
+    }
+
+    pub async fn call_handle_view_event(
+        &self,
+        store: &mut wasmtime::Store<WasmState>,
+        view_id: &str,
+        element_id: &str,
+        event: AddonViewEvent,
+    ) -> wasmtime::Result<Result<(), String>> {
+        match self {
+            super::Extension::V0_9_0(extension) => {
+                extension
+                    .call_handle_view_event(store, view_id, element_id, &event.into())
+                    .await
+            }
             _ => Ok(Err(
                 "addon views require extension API v0.9.0 or later".to_string()
             )),
@@ -595,6 +682,18 @@ mod tests {
                 .lock()
                 .push(format!("refresh {extension_id}/{view_id}"));
         }
+
+        fn open_view_tab(
+            &self,
+            extension_id: Arc<str>,
+            view_id: Arc<str>,
+            title: String,
+            _cx: &mut App,
+        ) {
+            self.calls
+                .lock()
+                .push(format!("open {extension_id}/{view_id} {title:?}"));
+        }
     }
 
     #[gpui::test]
@@ -620,6 +719,9 @@ mod tests {
         ui::Host::refresh_view(&mut state, "files".into())
             .await
             .unwrap();
+        ui::Host::open_view_tab(&mut state, "dashboard".into(), "Dashboard".into())
+            .await
+            .unwrap();
 
         assert_eq!(
             recorder.calls.lock().as_slice(),
@@ -627,6 +729,7 @@ mod tests {
                 r#"set stub/count "Count: 1" Some("Say hello") Some("say-hello")"#,
                 "remove stub/count",
                 "refresh stub/files",
+                r#"open stub/dashboard "Dashboard""#,
             ]
         );
     }

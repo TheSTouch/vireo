@@ -567,6 +567,37 @@ impl extension::Extension for WasmExtension {
         })
         .await?
     }
+
+    async fn addon_render_view(&self, view_id: Arc<str>) -> Result<extension::AddonViewTree> {
+        self.call(move |extension, store| {
+            async move {
+                extension
+                    .call_render_view(store, &view_id)
+                    .await?
+                    .map_err(|error| store.data().extension_error(error))
+            }
+            .boxed()
+        })
+        .await?
+    }
+
+    async fn addon_handle_view_event(
+        &self,
+        view_id: Arc<str>,
+        element_id: String,
+        event: extension::AddonViewEvent,
+    ) -> Result<()> {
+        self.call(move |extension, store| {
+            async move {
+                extension
+                    .call_handle_view_event(store, &view_id, &element_id, event)
+                    .await?
+                    .map_err(|error| store.data().extension_error(error))
+            }
+            .boxed()
+        })
+        .await?
+    }
 }
 
 pub struct WasmState {

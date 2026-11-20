@@ -9,7 +9,7 @@ world extension {
     import process;
     import nodejs;
     import ui;
-    use ui.{tree-item};
+    use ui.{tree-item, view-event, view-tree};
 
     use common.{env-vars, range};
     use context-server.{context-server-configuration};
@@ -192,4 +192,11 @@ world extension {
     /// Returns the children of an item of the tree view `view-id`, or its root
     /// items when `parent` is none.
     export tree-children: func(view-id: string, parent: option<string>) -> result<list<tree-item>, string>;
+
+    /// Returns the content of the custom view `view-id`. Called when the view
+    /// opens, after each of its events, and after `refresh-view`.
+    export render-view: func(view-id: string) -> result<view-tree, string>;
+
+    /// Tells the addon that an element of a custom view was used.
+    export handle-view-event: func(view-id: string, element-id: string, event: view-event) -> result<_, string>;
 }

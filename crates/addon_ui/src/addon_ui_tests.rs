@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use collections::HashMap;
-use extension::AddonTreeItem;
+use extension::{AddonElement, AddonElementKind, AddonTreeItem, AddonViewEvent, AddonViewTree};
 use extension::{
     AddonStatusItem, BuildTaskTemplate, CodeLabel, Command, Completion, ContextServerConfiguration,
     DebugAdapterBinary, DebugRequest, DebugScenario, DebugTaskDefinition, Extension,
@@ -18,6 +18,7 @@ use lsp::LanguageServerName;
 use parking_lot::Mutex;
 use project::Project;
 use task::{SpawnInTerminal, ZedDebugConfig};
+use workspace::Item as _;
 use workspace::dock::{DockPosition, Panel as _};
 use workspace::{AppState, MultiWorkspace};
 
@@ -29,6 +30,7 @@ pub(crate) struct FakeAddon {
     pub manifest: Arc<ExtensionManifest>,
     pub commands_run: Mutex<Vec<(Arc<str>, Vec<String>)>>,
     pub tree_children: Mutex<HashMap<Option<String>, Vec<AddonTreeItem>>>,
+    pub view_events: Mutex<Vec<(String, AddonViewEvent)>>,
 }
 
 impl FakeAddon {
@@ -37,6 +39,7 @@ impl FakeAddon {
             manifest: Arc::new(toml::from_str(manifest_toml).expect("manifest should parse")),
             commands_run: Mutex::default(),
             tree_children: Mutex::default(),
+            view_events: Mutex::default(),
         })
     }
 
@@ -59,6 +62,61 @@ impl Extension for FakeAddon {
 
     async fn run_addon_command(&self, command_id: Arc<str>, args: Vec<String>) -> Result<()> {
         self.commands_run.lock().push((command_id, args));
+        Ok(())
+    }
+
+    /// A counter view: a label showing how often the button was clicked, the
+    /// button, a text input and a checkbox.
+    async fn addon_render_view(&self, view_id: Arc<str>) -> Result<AddonViewTree> {
+        let clicks = self
+            .view_events
+            .lock()
+            .iter()
+            .filter(|(_, event)| *event == AddonViewEvent::Click)
+            .count();
+        let element = |id: &str, kind, children: Vec<u32>| AddonElement {
+            id: id.into(),
+            kind,
+            children,
+        };
+        Ok(AddonViewTree {
+            elements: vec![
+                element("root", AddonElementKind::Column, vec![1, 2, 3, 4, 5]),
+                element(
+                    "count",
+                    AddonElementKind::Label(format!("{view_id}: {clicks} clicks")),
+                    vec![],
+                ),
+                element("inc", AddonElementKind::Button("Click".into()), vec![]),
+                element(
+                    "name",
+                    AddonElementKind::TextInput {
+                        value: "world".into(),
+                        placeholder: Some("Name".into()),
+                    },
+                    vec![],
+                ),
+                element(
+                    "shout",
+                    AddonElementKind::Checkbox {
+                        label: "Shout".into(),
+                        checked: false,
+                    },
+                    vec![],
+                ),
+                // A child that points back at the root must not loop forever.
+                element("cycle", AddonElementKind::Row, vec![0]),
+            ],
+        })
+    }
+
+    async fn addon_handle_view_event(
+        &self,
+        _view_id: Arc<str>,
+        element_id: String,
+        event: AddonViewEvent,
+    ) -> Result<()> {
+        self.view_events.lock().push((element_id, event));
         Ok(())
     }
 
@@ -520,5 +578,91 @@ async fn test_addon_panels_show_tree_views(cx: &mut TestAppContext) {
         workspace
             .read_with(cx, |workspace, cx| workspace.panel::<AddonPanel<0>>(cx))
             .is_none()
+    );
+}
+
+fn count_label(view: &Entity<AddonView>, cx: &mut VisualTestContext) -> Option<String> {
+    view.read_with(cx, |view, _| {
+        view.view_tree()?
+            .elements
+            .iter()
+            .find_map(|element| match &element.kind {
+                AddonElementKind::Label(text) if element.id == "count" => Some(text.clone()),
+                _ => None,
+            })
+    })
+}
+
+#[gpui::test]
+async fn test_custom_views_open_in_editor_tabs(cx: &mut TestAppContext) {
+    let (app_state, proxy) = init_test(cx);
+    let addon = FakeAddon::new(HELLO_MANIFEST);
+    cx.update(|cx| proxy.register_addon(addon.clone(), cx));
+    let project = Project::test(app_state.fs.clone(), [], cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        let registry = AddonRegistry::global(cx).expect("registry is initialized");
+        let key = AddonViewKey::new("hello-ui", "dashboard");
+        view::open_view_tab(
+            workspace,
+            key.clone(),
+            "Dashboard".into(),
+            registry.clone(),
+            window,
+            cx,
+        );
+        // Opening the same view again activates its tab instead of adding one.
+        view::open_view_tab(workspace, key, "Dashboard".into(), registry, window, cx);
+    });
+    cx.run_until_parked();
+
+    let items: Vec<_> = workspace.read_with(cx, |workspace, cx| {
+        workspace.items_of_type::<AddonViewItem>(cx).collect()
+    });
+    assert_eq!(items.len(), 1);
+    let tab_title = items[0].read_with(cx, |item, cx| item.tab_content_text(0, cx));
+    assert_eq!(tab_title, "Dashboard");
+    let view = items[0].read_with(cx, |item, _| item.view().clone());
+    assert_eq!(
+        count_label(&view, cx).as_deref(),
+        Some("dashboard: 0 clicks")
+    );
+
+    // A click goes to the addon, and the view renders again.
+    view.update_in(cx, |view, window, cx| {
+        view.send_event("inc".into(), AddonViewEvent::Click, window, cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        count_label(&view, cx).as_deref(),
+        Some("dashboard: 1 clicks")
+    );
+
+    // Text inputs show the addon's value and send what the user types.
+    let input = view
+        .read_with(cx, |view, _| view.text_input("name"))
+        .expect("the text input has an editor");
+    assert_eq!(input.read_with(cx, |editor, cx| editor.text(cx)), "world");
+    input.update_in(cx, |editor, window, cx| {
+        editor.set_text("Vireo", window, cx)
+    });
+    cx.run_until_parked();
+    assert!(
+        addon
+            .view_events
+            .lock()
+            .contains(&("name".to_string(), AddonViewEvent::Change("Vireo".into()))),
+        "events: {:?}",
+        addon.view_events.lock()
+    );
+    // Setting the addon's own value did not echo back as a change.
+    assert!(
+        !addon
+            .view_events
+            .lock()
+            .contains(&("name".to_string(), AddonViewEvent::Change("world".into())))
     );
 }

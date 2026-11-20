@@ -15,7 +15,6 @@ workspace = true
 
 [lib]
 path = "src/extension_api.rs"
-test = false
 doctest = false
 
 [dependencies]

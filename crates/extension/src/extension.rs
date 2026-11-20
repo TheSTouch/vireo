@@ -207,6 +207,22 @@ pub trait Extension: Send + Sync + 'static {
         let _ = parent;
         bail!("extension cannot show tree view `{view_id}`: it predates the addon API")
     }
+
+    /// Returns the content of an addon custom view.
+    async fn addon_render_view(&self, view_id: Arc<str>) -> Result<crate::AddonViewTree> {
+        bail!("extension cannot show view `{view_id}`: it predates the addon API")
+    }
+
+    /// Tells the addon that an element of one of its custom views was used.
+    async fn addon_handle_view_event(
+        &self,
+        view_id: Arc<str>,
+        element_id: String,
+        event: crate::AddonViewEvent,
+    ) -> Result<()> {
+        let _ = (element_id, event);
+        bail!("extension cannot handle events of view `{view_id}`: it predates the addon API")
+    }
 }
 
 pub fn parse_wasm_extension_version(extension_id: &str, wasm_bytes: &[u8]) -> Result<Version> {
