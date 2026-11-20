@@ -550,6 +550,23 @@ impl extension::Extension for WasmExtension {
         })
         .await?
     }
+
+    async fn addon_tree_children(
+        &self,
+        view_id: Arc<str>,
+        parent: Option<String>,
+    ) -> Result<Vec<extension::AddonTreeItem>> {
+        self.call(move |extension, store| {
+            async move {
+                extension
+                    .call_tree_children(store, &view_id, parent.as_deref())
+                    .await?
+                    .map_err(|error| store.data().extension_error(error))
+            }
+            .boxed()
+        })
+        .await?
+    }
 }
 
 pub struct WasmState {

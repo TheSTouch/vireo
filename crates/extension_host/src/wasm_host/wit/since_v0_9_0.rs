@@ -8,8 +8,8 @@
 use crate::wasm_host::WasmState;
 use anyhow::Result;
 use extension::{
-    AddonStatusItem, ExtensionAddonProxy as _, ExtensionHostProxy, KeyValueStoreDelegate,
-    ProjectDelegate, WorktreeDelegate,
+    AddonStatusItem, AddonTreeItem, ExtensionAddonProxy as _, ExtensionHostProxy,
+    KeyValueStoreDelegate, ProjectDelegate, WorktreeDelegate,
 };
 use gpui::{App, BackgroundExecutor};
 use semver::Version;
@@ -262,6 +262,27 @@ impl ui::Host for WasmState {
         })
         .await
     }
+
+    async fn refresh_view(&mut self, view_id: String) -> wasmtime::Result<()> {
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.refresh_view(extension_id, view_id.into(), cx)
+        })
+        .await
+    }
+}
+
+impl From<ui::TreeItem> for AddonTreeItem {
+    fn from(item: ui::TreeItem) -> Self {
+        Self {
+            id: item.id,
+            label: item.label,
+            description: item.description,
+            icon: item.icon,
+            collapsible: item.collapsible,
+            command: item.command,
+            context_value: item.context_value,
+        }
+    }
 }
 
 impl WasmState {
@@ -291,6 +312,23 @@ impl super::Extension {
             }
             _ => Ok(Err(
                 "addon commands require extension API v0.9.0 or later".to_string()
+            )),
+        }
+    }
+
+    pub async fn call_tree_children(
+        &self,
+        store: &mut wasmtime::Store<WasmState>,
+        view_id: &str,
+        parent: Option<&str>,
+    ) -> wasmtime::Result<Result<Vec<AddonTreeItem>, String>> {
+        match self {
+            super::Extension::V0_9_0(extension) => Ok(extension
+                .call_tree_children(store, view_id, parent)
+                .await?
+                .map(|items| items.into_iter().map(Into::into).collect())),
+            _ => Ok(Err(
+                "addon views require extension API v0.9.0 or later".to_string()
             )),
         }
     }
@@ -551,10 +589,16 @@ mod tests {
                 .lock()
                 .push(format!("remove {extension_id}/{item_id}"));
         }
+
+        fn refresh_view(&self, extension_id: Arc<str>, view_id: Arc<str>, _cx: &mut App) {
+            self.calls
+                .lock()
+                .push(format!("refresh {extension_id}/{view_id}"));
+        }
     }
 
     #[gpui::test]
-    async fn test_status_item_imports_reach_the_addon_ui(cx: &mut TestAppContext) {
+    async fn test_ui_imports_reach_the_addon_ui(cx: &mut TestAppContext) {
         let proxy = Arc::new(ExtensionHostProxy::new());
         let recorder = RecordingAddonProxy::default();
         proxy.register_addon_proxy(recorder.clone());
@@ -573,12 +617,16 @@ mod tests {
         ui::Host::remove_status_item(&mut state, "count".into())
             .await
             .unwrap();
+        ui::Host::refresh_view(&mut state, "files".into())
+            .await
+            .unwrap();
 
         assert_eq!(
             recorder.calls.lock().as_slice(),
             [
                 r#"set stub/count "Count: 1" Some("Say hello") Some("say-hello")"#,
                 "remove stub/count",
+                "refresh stub/files",
             ]
         );
     }

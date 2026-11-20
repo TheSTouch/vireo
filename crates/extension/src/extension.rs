@@ -196,6 +196,17 @@ pub trait Extension: Send + Sync + 'static {
         let _ = args;
         bail!("extension cannot run addon command `{command_id}`: it predates the addon API")
     }
+
+    /// Returns the children of an item of an addon tree view, or its root items
+    /// when `parent` is `None`.
+    async fn addon_tree_children(
+        &self,
+        view_id: Arc<str>,
+        parent: Option<String>,
+    ) -> Result<Vec<crate::AddonTreeItem>> {
+        let _ = parent;
+        bail!("extension cannot show tree view `{view_id}`: it predates the addon API")
+    }
 }
 
 pub fn parse_wasm_extension_version(extension_id: &str, wasm_bytes: &[u8]) -> Result<Version> {

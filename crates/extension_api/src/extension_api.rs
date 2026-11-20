@@ -291,6 +291,19 @@ pub trait Extension: Send + Sync {
     fn run_command(&mut self, command_id: &str, _args: Vec<String>) -> Result<(), String> {
         Err(format!("command `{command_id}` is not implemented"))
     }
+
+    /// Returns the children of an item of the tree view `view_id`, or its root
+    /// items when `parent` is `None`.
+    ///
+    /// A tree view is shown by a panel declared under `[panels.<id>]` with
+    /// `view = "tree"`; the view ID is the panel ID.
+    fn tree_children(
+        &mut self,
+        view_id: &str,
+        _parent: Option<String>,
+    ) -> Result<Vec<addon::ui::TreeItem>, String> {
+        Err(format!("tree view `{view_id}` is not implemented"))
+    }
 }
 
 /// Registers the provided type as a Zed extension.
@@ -572,6 +585,13 @@ impl wit::Guest for Component {
 
     fn run_command(command_id: String, args: Vec<String>) -> Result<(), String> {
         extension().run_command(&command_id, args)
+    }
+
+    fn tree_children(
+        view_id: String,
+        parent: Option<String>,
+    ) -> Result<Vec<addon::ui::TreeItem>, String> {
+        extension().tree_children(&view_id, parent)
     }
 }
 

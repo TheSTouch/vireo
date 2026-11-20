@@ -11,4 +11,27 @@ interface ui {
 
     /// Removes one of the addon's status bar items.
     remove-status-item: func(id: string);
+
+    /// An item of a tree view.
+    record tree-item {
+        /// The item ID, unique within the view. Passed back as the parent when
+        /// the item expands, and as the argument of commands run on the item.
+        id: string,
+        label: string,
+        /// Shown dimmed after the label.
+        description: option<string>,
+        /// The name of a Vireo icon, such as `folder` or `file`.
+        icon: option<string>,
+        /// Whether the item has children and can expand.
+        collapsible: bool,
+        /// The ID of the addon command run, with the item ID as argument, when
+        /// the item is clicked.
+        command: option<string>,
+        /// Matched against the `when` of the panel's context menu entries.
+        context-value: option<string>,
+    }
+
+    /// Asks every place that shows the view to ask the addon for its content
+    /// again: `tree-children` for tree views.
+    refresh-view: func(view-id: string);
 }

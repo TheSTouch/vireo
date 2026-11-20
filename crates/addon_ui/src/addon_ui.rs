@@ -2,9 +2,13 @@
 //! panels, views and editor decorations that Wasm extensions contribute
 //! through extension API v0.9.0.
 
+mod panel;
 mod status_bar;
+mod view;
 
+pub use panel::{AddonPanel, PANEL_SLOTS, TogglePanel};
 pub use status_bar::AddonStatusItems;
+pub use view::AddonView;
 
 use std::sync::Arc;
 
@@ -13,8 +17,13 @@ use collections::BTreeMap;
 use command_palette_hooks::{
     CommandPaletteExtraCommand, CommandPaletteFilter, GlobalCommandPaletteExtraCommands,
 };
-use extension::{AddonStatusItem, Extension, ExtensionAddonProxy, ExtensionHostProxy};
-use gpui::{Action, App, AppContext as _, Context, Entity, Global, SharedString, Task};
+use extension::{
+    AddonContextMenuEntry, AddonPanelManifestEntry, AddonStatusItem, AddonTreeItem, Extension,
+    ExtensionAddonProxy, ExtensionHostProxy,
+};
+use gpui::{
+    Action, App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task,
+};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use workspace::{Toast, Workspace, notifications::NotificationId};
@@ -43,17 +52,30 @@ pub fn init(proxy: Arc<ExtensionHostProxy>, cx: &mut App) {
 
     GlobalCommandPaletteExtraCommands::register(cx, "addon_ui", palette_commands);
     CommandPaletteFilter::update_global(cx, |filter, _| {
-        filter.hide_action_types(&[std::any::TypeId::of::<RunCommand>()]);
+        filter.hide_action_types(&[
+            std::any::TypeId::of::<RunCommand>(),
+            std::any::TypeId::of::<TogglePanel>(),
+        ]);
     });
 
     cx.observe_new(|workspace: &mut Workspace, window, cx| {
         workspace.register_action(|_, action: &RunCommand, _, cx| {
             run_command_in_workspace(action.clone(), cx);
         });
+        workspace.register_action(|workspace, action: &TogglePanel, window, cx| {
+            if let Some(registry) = AddonRegistry::global(cx) {
+                panel::toggle_panel(workspace, action, &registry, window, cx);
+            }
+        });
         if let Some(window) = window
             && let Some(registry) = AddonRegistry::global(cx)
         {
-            status_bar::add_to_workspace(workspace, registry, window, cx);
+            status_bar::add_to_workspace(workspace, registry.clone(), window, cx);
+            panel::sync_panels(workspace, &registry, window, cx);
+            cx.observe_in(&registry, window, |workspace, registry, window, cx| {
+                panel::sync_panels(workspace, &registry, window, cx);
+            })
+            .detach();
         }
     })
     .detach();
@@ -69,7 +91,34 @@ pub struct AddonRegistry {
     addons: BTreeMap<Arc<str>, Arc<dyn Extension>>,
     /// Status bar items by addon, in the order the addon first set them.
     status_items: BTreeMap<Arc<str>, Vec<AddonStatusItem>>,
+    /// The addon panel shown by each `AddonPanel<SLOT>` type.
+    panel_slots: [Option<AddonViewKey>; PANEL_SLOTS],
 }
+
+/// Identifies a view: an addon and the view ID it chose. A panel's view ID is
+/// the panel ID.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct AddonViewKey {
+    pub extension_id: Arc<str>,
+    pub view_id: Arc<str>,
+}
+
+impl AddonViewKey {
+    pub fn new(extension_id: impl Into<Arc<str>>, view_id: impl Into<Arc<str>>) -> Self {
+        Self {
+            extension_id: extension_id.into(),
+            view_id: view_id.into(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AddonRegistryEvent {
+    /// The addon asked for a view to show fresh content.
+    RefreshView(AddonViewKey),
+}
+
+impl EventEmitter<AddonRegistryEvent> for AddonRegistry {}
 
 /// An addon command, as listed in the command palette.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -112,6 +161,7 @@ impl AddonRegistry {
     pub fn register(&mut self, extension: Arc<dyn Extension>, cx: &mut Context<Self>) {
         let extension_id = extension.manifest().id.clone();
         self.addons.insert(extension_id, extension);
+        self.assign_panel_slots();
         cx.notify();
     }
 
@@ -119,8 +169,137 @@ impl AddonRegistry {
         let removed_addon = self.addons.remove(extension_id).is_some();
         let removed_items = self.status_items.remove(extension_id).is_some();
         if removed_addon || removed_items {
+            self.assign_panel_slots();
             cx.notify();
         }
+    }
+
+    /// Frees the slots of panels that are gone and gives free slots to new
+    /// panels, keeping existing panels in their slots.
+    fn assign_panel_slots(&mut self) {
+        let stale_slots: Vec<usize> = (0..PANEL_SLOTS)
+            .filter(|&slot| {
+                self.panel_slots[slot]
+                    .as_ref()
+                    .is_some_and(|key| self.panel(key).is_none())
+            })
+            .collect();
+        for slot in stale_slots {
+            self.panel_slots[slot] = None;
+        }
+        for (extension_id, extension) in &self.addons {
+            for panel_id in extension.manifest().addon.panels.keys() {
+                let key = AddonViewKey::new(extension_id.clone(), panel_id.clone());
+                if self.panel_slots.contains(&Some(key.clone())) {
+                    continue;
+                }
+                match self.panel_slots.iter_mut().find(|slot| slot.is_none()) {
+                    Some(slot) => *slot = Some(key),
+                    None => log::warn!(
+                        "not showing addon panel {}/{}: only {PANEL_SLOTS} addon panels can be shown",
+                        key.extension_id,
+                        key.view_id
+                    ),
+                }
+            }
+        }
+    }
+
+    /// The manifest entry of a panel of a registered addon.
+    pub fn panel(&self, key: &AddonViewKey) -> Option<AddonPanelManifestEntry> {
+        self.addons
+            .get(&key.extension_id)?
+            .manifest()
+            .addon
+            .panels
+            .get(&key.view_id)
+            .cloned()
+    }
+
+    pub fn panel_in_slot(&self, slot: usize) -> Option<AddonViewKey> {
+        self.panel_slots.get(slot).cloned().flatten()
+    }
+
+    pub fn slot_of_panel(&self, key: &AddonViewKey) -> Option<usize> {
+        self.panel_slots
+            .iter()
+            .position(|slot| slot.as_ref() == Some(key))
+    }
+
+    /// Every panel of every addon, with the title shown in the command palette.
+    pub fn panels(&self) -> Vec<(AddonViewKey, SharedString)> {
+        self.addons
+            .iter()
+            .flat_map(|(extension_id, extension)| {
+                let manifest = extension.manifest();
+                manifest
+                    .addon
+                    .panels
+                    .iter()
+                    .map(|(panel_id, panel)| {
+                        (
+                            AddonViewKey::new(extension_id.clone(), panel_id.clone()),
+                            format!("{}: Toggle {}", manifest.name, panel.title).into(),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// Asks every place that shows the view to ask the addon for its content again.
+    pub fn refresh_view(&mut self, key: AddonViewKey, cx: &mut Context<Self>) {
+        cx.emit(AddonRegistryEvent::RefreshView(key));
+    }
+
+    /// The context menu commands offered on a tree item, with their titles.
+    pub fn context_menu_entries(
+        &self,
+        key: &AddonViewKey,
+        context_value: Option<&str>,
+    ) -> Vec<(Arc<str>, SharedString)> {
+        let Some(extension) = self.addons.get(&key.extension_id) else {
+            return Vec::new();
+        };
+        let manifest = extension.manifest();
+        let Some(panel) = manifest.addon.panels.get(&key.view_id) else {
+            return Vec::new();
+        };
+        panel
+            .context_menu
+            .iter()
+            .filter(|entry: &&AddonContextMenuEntry| {
+                entry
+                    .when
+                    .as_deref()
+                    .is_none_or(|when| Some(when) == context_value)
+            })
+            .filter_map(|entry| {
+                let command = manifest.addon.commands.get(&entry.command)?;
+                Some((entry.command.clone(), command.title.clone().into()))
+            })
+            .collect()
+    }
+
+    /// Asks an addon for the children of a tree view item.
+    pub fn tree_children(
+        &self,
+        key: &AddonViewKey,
+        parent: Option<Arc<str>>,
+        cx: &App,
+    ) -> Task<Result<Vec<AddonTreeItem>>> {
+        let Some(extension) = self.addon(&key.extension_id) else {
+            return Task::ready(Err(anyhow::anyhow!(
+                "no addon with ID `{}` is loaded",
+                key.extension_id
+            )));
+        };
+        let view_id = key.view_id.clone();
+        cx.background_spawn(async move {
+            extension
+                .addon_tree_children(view_id, parent.map(|parent| parent.to_string()))
+                .await
+        })
     }
 
     /// Every addon's status bar items, ordered by addon ID.
@@ -232,14 +411,22 @@ impl ExtensionAddonProxy for AddonProxy {
             });
         }
     }
+
+    fn refresh_view(&self, extension_id: Arc<str>, view_id: Arc<str>, cx: &mut App) {
+        if let Some(registry) = AddonRegistry::global(cx) {
+            registry.update(cx, |registry, cx| {
+                registry.refresh_view(AddonViewKey::new(extension_id, view_id), cx)
+            });
+        }
+    }
 }
 
 fn palette_commands(cx: &App) -> Vec<CommandPaletteExtraCommand> {
     let Some(registry) = AddonRegistry::global(cx) else {
         return Vec::new();
     };
-    registry
-        .read(cx)
+    let registry = registry.read(cx);
+    let commands = registry
         .commands()
         .into_iter()
         .map(|command| CommandPaletteExtraCommand {
@@ -249,8 +436,18 @@ fn palette_commands(cx: &App) -> Vec<CommandPaletteExtraCommand> {
                 command: command.command_id.to_string(),
                 args: Vec::new(),
             }),
-        })
-        .collect()
+        });
+    let panels = registry
+        .panels()
+        .into_iter()
+        .map(|(key, label)| CommandPaletteExtraCommand {
+            name: label.to_string(),
+            action: Box::new(TogglePanel {
+                extension: key.extension_id.to_string(),
+                panel: key.view_id.to_string(),
+            }),
+        });
+    commands.chain(panels).collect()
 }
 
 struct AddonCommandError;

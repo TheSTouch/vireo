@@ -9,6 +9,7 @@ world extension {
     import process;
     import nodejs;
     import ui;
+    use ui.{tree-item};
 
     use common.{env-vars, range};
     use context-server.{context-server-configuration};
@@ -187,4 +188,8 @@ world extension {
     /// `args` holds the arguments given by the caller: a keymap binding, a status bar
     /// item, or a tree item (whose ID is passed as the only argument).
     export run-command: func(command-id: string, args: list<string>) -> result<_, string>;
+
+    /// Returns the children of an item of the tree view `view-id`, or its root
+    /// items when `parent` is none.
+    export tree-children: func(view-id: string, parent: option<string>) -> result<list<tree-item>, string>;
 }

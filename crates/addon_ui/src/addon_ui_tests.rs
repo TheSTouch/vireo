@@ -3,6 +3,8 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
+use collections::HashMap;
+use extension::AddonTreeItem;
 use extension::{
     AddonStatusItem, BuildTaskTemplate, CodeLabel, Command, Completion, ContextServerConfiguration,
     DebugAdapterBinary, DebugRequest, DebugScenario, DebugTaskDefinition, Extension,
@@ -10,20 +12,23 @@ use extension::{
     SlashCommandArgumentCompletion, SlashCommandOutput, StartDebuggingRequestArgumentsRequest,
     Symbol, WorktreeDelegate,
 };
-use gpui::{EntityId, TestAppContext};
+use gpui::{Entity, EntityId, TestAppContext, VisualTestContext};
 use language::LanguageName;
 use lsp::LanguageServerName;
 use parking_lot::Mutex;
 use project::Project;
 use task::{SpawnInTerminal, ZedDebugConfig};
+use workspace::dock::{DockPosition, Panel as _};
 use workspace::{AppState, MultiWorkspace};
 
 use crate::*;
 
-/// An addon that records the commands it is asked to run.
+/// An addon that records the commands it is asked to run and answers with
+/// canned view content.
 pub(crate) struct FakeAddon {
     pub manifest: Arc<ExtensionManifest>,
     pub commands_run: Mutex<Vec<(Arc<str>, Vec<String>)>>,
+    pub tree_children: Mutex<HashMap<Option<String>, Vec<AddonTreeItem>>>,
 }
 
 impl FakeAddon {
@@ -31,7 +36,14 @@ impl FakeAddon {
         Arc::new(Self {
             manifest: Arc::new(toml::from_str(manifest_toml).expect("manifest should parse")),
             commands_run: Mutex::default(),
+            tree_children: Mutex::default(),
         })
+    }
+
+    pub fn set_tree_children(&self, parent: Option<&str>, children: Vec<AddonTreeItem>) {
+        self.tree_children
+            .lock()
+            .insert(parent.map(ToString::to_string), children);
     }
 }
 
@@ -48,6 +60,19 @@ impl Extension for FakeAddon {
     async fn run_addon_command(&self, command_id: Arc<str>, args: Vec<String>) -> Result<()> {
         self.commands_run.lock().push((command_id, args));
         Ok(())
+    }
+
+    async fn addon_tree_children(
+        &self,
+        _view_id: Arc<str>,
+        parent: Option<String>,
+    ) -> Result<Vec<AddonTreeItem>> {
+        Ok(self
+            .tree_children
+            .lock()
+            .get(&parent)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn language_server_command(
@@ -367,4 +392,133 @@ async fn test_status_items_show_in_the_status_bar(cx: &mut TestAppContext) {
 
     cx.update(|cx| proxy.unregister_addon("hello-ui".into(), cx));
     assert!(texts(cx).is_empty(), "unloading an addon removes its items");
+}
+
+pub(crate) const PANEL_MANIFEST: &str = r#"
+id = "tree-addon"
+name = "Tree Addon"
+version = "0.1.0"
+schema_version = 1
+
+[commands.open-item]
+title = "Open"
+
+[commands.show-path]
+title = "Show Path"
+
+[panels.files]
+title = "Files"
+icon = "folder"
+dock = "right"
+
+[[panels.files.context_menu]]
+command = "open-item"
+when = "file"
+
+[[panels.files.context_menu]]
+command = "show-path"
+"#;
+
+fn tree_item(id: &str, collapsible: bool) -> AddonTreeItem {
+    AddonTreeItem {
+        id: id.into(),
+        label: id.rsplit('/').next().unwrap_or(id).into(),
+        description: None,
+        icon: Some(if collapsible { "folder" } else { "file" }.into()),
+        collapsible,
+        command: (!collapsible).then(|| "open-item".into()),
+        context_value: Some(if collapsible { "folder" } else { "file" }.into()),
+    }
+}
+
+fn visible_labels(view: &Entity<AddonView>, cx: &mut VisualTestContext) -> Vec<String> {
+    view.read_with(cx, |view, _| {
+        view.visible_items()
+            .into_iter()
+            .map(|(depth, item)| format!("{}{}", "  ".repeat(depth), item.label))
+            .collect()
+    })
+}
+
+#[gpui::test]
+async fn test_addon_panels_show_tree_views(cx: &mut TestAppContext) {
+    let (app_state, proxy) = init_test(cx);
+    let project = Project::test(app_state.fs.clone(), [], cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+
+    let addon = FakeAddon::new(PANEL_MANIFEST);
+    addon.set_tree_children(None, vec![tree_item("root", true)]);
+    addon.set_tree_children(
+        Some("root"),
+        vec![
+            tree_item("root/src", true),
+            tree_item("root/README.md", false),
+        ],
+    );
+    cx.update(|_, cx| proxy.register_addon(addon.clone(), cx));
+    cx.run_until_parked();
+
+    // Registering the addon adds its panel to the workspace.
+    let panel = workspace
+        .read_with(cx, |workspace, cx| workspace.panel::<AddonPanel<0>>(cx))
+        .expect("the addon panel is added");
+    let (key, position) = panel.update_in(cx, |panel, window, cx| {
+        (panel.key().clone(), panel.position(window, cx))
+    });
+    assert_eq!(key, AddonViewKey::new("tree-addon", "files"));
+    assert_eq!(position, DockPosition::Right);
+
+    // The tree shows the root items, and expanding an item asks for its children.
+    let view = panel.read_with(cx, |panel, _| panel.view().clone());
+    assert_eq!(visible_labels(&view, cx), ["root"]);
+    view.update(cx, |view, cx| view.toggle_expanded("root", cx));
+    cx.run_until_parked();
+    assert_eq!(visible_labels(&view, cx), ["root", "  src", "  README.md"]);
+
+    // Context menu entries are filtered by the item's context value.
+    let registry = cx.update(|_, cx| AddonRegistry::global(cx).expect("registry is initialized"));
+    let titles = |context_value: Option<&str>, cx: &mut VisualTestContext| {
+        registry.read_with(cx, |registry, _| {
+            registry
+                .context_menu_entries(&key, context_value)
+                .into_iter()
+                .map(|(command, title)| format!("{command}: {title}"))
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        titles(Some("file"), cx),
+        ["open-item: Open", "show-path: Show Path"]
+    );
+    assert_eq!(titles(Some("folder"), cx), ["show-path: Show Path"]);
+
+    // `refresh-view` asks the addon again, keeping expanded items expanded.
+    addon.set_tree_children(Some("root"), vec![tree_item("root/new.rs", false)]);
+    cx.update(|_, cx| proxy.refresh_view("tree-addon".into(), "files".into(), cx));
+    cx.run_until_parked();
+    assert_eq!(visible_labels(&view, cx), ["root", "  new.rs"]);
+
+    // The panel is listed in the command palette.
+    let commands = cx.update(|_, cx| GlobalCommandPaletteExtraCommands::commands(cx));
+    assert!(
+        commands
+            .iter()
+            .any(|command| command.name == "Tree Addon: Toggle Files"),
+        "palette commands: {:?}",
+        commands
+            .iter()
+            .map(|command| &command.name)
+            .collect::<Vec<_>>()
+    );
+
+    // Unloading the addon removes its panel.
+    cx.update(|_, cx| proxy.unregister_addon("tree-addon".into(), cx));
+    cx.run_until_parked();
+    assert!(
+        workspace
+            .read_with(cx, |workspace, cx| workspace.panel::<AddonPanel<0>>(cx))
+            .is_none()
+    );
 }
