@@ -862,8 +862,13 @@ pub struct ProjectPanelSettingsContent {
     pub file_icons: Option<bool>,
     /// What to show for directories in the project panel.
     ///
-    /// Default: icon
+    /// Default: chevron
     pub folder_indicator: Option<FolderIndicator>,
+    /// Whether to show VS Code's "Explorer" title row at the top of the
+    /// project panel.
+    ///
+    /// Default: true
+    pub show_title: Option<bool>,
     /// Whether to show the git status in the project panel.
     ///
     /// Default: true

@@ -61,8 +61,9 @@ use svg_preview::svg_preview_view::SvgPreviewView;
 use theme_settings::ThemeSettings;
 use ui::{
     ContextMenu, DecoratedIcon, IconDecoration, IconDecorationKind, IndentGuideColors,
-    IndentGuideLayout, Indicator, KeyBinding, ListItem, ListItemSpacing, ProjectEmptyState,
-    ScrollAxes, ScrollableHandle, Scrollbars, StickyCandidate, Tooltip, WithScrollbar, prelude::*,
+    IndentGuideLayout, Indicator, KeyBinding, ListItem, ListItemSpacing, PopoverMenu,
+    ProjectEmptyState, ScrollAxes, ScrollableHandle, Scrollbars, StickyCandidate, Tooltip,
+    WithScrollbar, prelude::*,
 };
 use util::{
     ResultExt, TryFutureExt,
@@ -6290,6 +6291,11 @@ impl ProjectPanel {
             .id(id.clone())
             .relative()
             .group(GROUP_NAME)
+            // VS Code's explorer rows are 22 px tall.
+            .when(
+                settings.entry_spacing == ProjectPanelEntrySpacing::Comfortable,
+                |this| this.h(EXPLORER_ROW_HEIGHT),
+            )
             .when_some(
                 tooltip_path.and_then(|path| {
                     let delay = match settings.title_tooltip_delay {
@@ -7571,6 +7577,49 @@ fn item_width_estimate(depth: usize, item_text_chars: usize, is_symlink: bool) -
     item_width
 }
 
+/// VS Code's explorer rows and title bar heights.
+const EXPLORER_ROW_HEIGHT: Pixels = px(22.);
+const EXPLORER_TITLE_HEIGHT: Pixels = px(35.);
+
+impl ProjectPanel {
+    /// VS Code's side bar title: "Explorer", and a "..." menu with the
+    /// explorer's own commands.
+    fn render_explorer_title(&self) -> AnyElement {
+        let focus_handle = self.focus_handle.clone();
+        h_flex()
+            .flex_none()
+            .w_full()
+            .h(EXPLORER_TITLE_HEIGHT)
+            .pl(px(13.))
+            .pr_1()
+            .justify_between()
+            .child(Label::new("Explorer"))
+            .child(
+                PopoverMenu::new("explorer-more-actions")
+                    .trigger(
+                        IconButton::new("explorer-more-actions-trigger", IconName::Ellipsis)
+                            .icon_size(IconSize::Small)
+                            .tooltip(Tooltip::text("More Actions...")),
+                    )
+                    .anchor(Anchor::TopRight)
+                    .menu(move |window, cx| {
+                        let focus_handle = focus_handle.clone();
+                        Some(ContextMenu::build(window, cx, move |menu, _, _| {
+                            menu.context(focus_handle)
+                                .action("New File...", Box::new(NewFile))
+                                .action("New Folder...", Box::new(NewDirectory))
+                                .separator()
+                                .action(
+                                    "Collapse Folders in Explorer",
+                                    Box::new(CollapseAllEntries),
+                                )
+                        }))
+                    }),
+            )
+            .into_any_element()
+    }
+}
+
 impl Render for ProjectPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !cx.has_active_drag() {
@@ -7774,6 +7823,9 @@ impl Render for ProjectPanel {
                 .track_focus(&self.focus_handle(cx))
                 .child(
                     v_flex()
+                        .when(panel_settings.show_title, |this| {
+                            this.child(self.render_explorer_title())
+                        })
                         .child(
                             uniform_list("entries", item_count, {
                                 cx.processor(|this, range: Range<usize>, window, cx| {

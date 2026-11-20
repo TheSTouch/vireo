@@ -14092,3 +14092,33 @@ fn entry_row_bounds(panel: &ProjectPanel, entry_id: ProjectEntryId) -> Bounds<Pi
         size(viewport.size.width, row_height),
     )
 }
+
+#[gpui::test]
+async fn test_explorer_rows_are_vs_code_height(cx: &mut TestAppContext) {
+    init_test_with_editor(cx);
+    let fs = FakeFs::new(cx.executor());
+    fs.insert_tree(
+        path!("/root"),
+        json!({ "a.txt": "", "b.txt": "", "src": { "main.rs": "" } }),
+    )
+    .await;
+    let project = Project::test(fs, [path!("/root").as_ref()], cx).await;
+    let (_window, panel) = create_drag_test_panel(&project, cx);
+
+    panel.read_with(cx, |panel, _| {
+        let item_count = panel
+            .state
+            .visible_entries
+            .iter()
+            .map(|worktree| worktree.entries.len())
+            .sum::<usize>();
+        let scroll = panel.scroll_handle.0.borrow();
+        let contents_height = scroll
+            .last_item_size
+            .expect("project entries were rendered")
+            .contents
+            .height;
+        // VS Code's explorer rows are 22 px tall.
+        assert_eq!(contents_height / item_count as f32, px(22.));
+    });
+}

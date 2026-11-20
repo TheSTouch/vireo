@@ -290,6 +290,20 @@ mod vireo_layout_defaults {
     }
 
     #[test]
+    fn explorer_matches_vs_code() {
+        let defaults = defaults();
+        // VS Code's Seti theme shows chevrons for folders, no folder icons,
+        // and indents each level by 8 px.
+        assert_default(
+            &defaults,
+            "/project_panel/folder_indicator",
+            json!("chevron"),
+        );
+        assert_default(&defaults, "/project_panel/indent_size", json!(8));
+        assert_default(&defaults, "/project_panel/show_title", json!(true));
+    }
+
+    #[test]
     fn status_bar_matches_vs_code() {
         let defaults = defaults();
         assert_default(&defaults, "/status_bar/remote_indicator", json!(true));
