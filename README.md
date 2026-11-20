@@ -49,8 +49,12 @@ VS Code runs every window as a Chromium renderer plus a Node extension host, plu
 
 ## Roadmap
 
-1. UI API for addons: the foundation everything else builds on.
-2. Claude Code panel, at feature parity with the VS Code extension.
+1. **UI API for addons: done.** Extension API v0.9.0 lets addons add commands, status bar items, panels with tree views, their own views in panels and editor tabs, and editor decorations. Addons can also use the active editor, notifications, quick picks and input boxes, workspace files and watches, settings and storage.
+   - Guide: [Writing addons with Vireo's UI API](./docs/src/vs-core/addon-ui-api.md).
+   - Sample addon: [`extensions/hello-ui`](./extensions/hello-ui).
+2. **Claude Code panel: mostly done.** Chat in a side panel, editor tabs or a new window; sessions; inline diff review per file and per hunk; permission modes; the IDE tools; the extension's commands, keybindings and settings.
+   - Status of every feature: [Claude Code parity checklist](./docs/src/vs-core/claude-parity.md).
+   - Still partial: the AskUserQuestion picker and a few chat controls, `executeCode` (no Jupyter kernel yet), and voice input.
 3. Feature addons, one VS Code capability at a time.
 4. Vireo branding, builds and releases.
 
