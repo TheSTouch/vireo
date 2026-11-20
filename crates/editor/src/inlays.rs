@@ -107,6 +107,15 @@ impl Inlay {
         }
     }
 
+    /// An inlay hint shown by a Vireo addon.
+    pub fn addon<T: Into<Rope>>(id: usize, position: Anchor, text: T) -> Self {
+        Self {
+            id: InlayId::Addon(id),
+            position,
+            content: InlayContent::Text(text.into()),
+        }
+    }
+
     pub fn repl_result<T: Into<Rope>>(id: usize, position: Anchor, text: T) -> Self {
         Self {
             id: InlayId::ReplResult(id),

@@ -8,12 +8,13 @@
 use crate::wasm_host::WasmState;
 use anyhow::Result;
 use extension::{
-    AddonElement, AddonElementKind, AddonStatusItem, AddonTreeItem, AddonViewEvent, AddonViewTree,
-    ExtensionAddonProxy as _, ExtensionHostProxy, KeyValueStoreDelegate, ProjectDelegate,
-    WorktreeDelegate,
+    AddonDecoration, AddonElement, AddonElementKind, AddonPosition, AddonSeverity, AddonStatusItem,
+    AddonTextRange, AddonTreeItem, AddonViewEvent, AddonViewTree, ExtensionAddonProxy as _,
+    ExtensionHostProxy, KeyValueStoreDelegate, ProjectDelegate, WorktreeDelegate,
 };
 use gpui::{App, BackgroundExecutor};
 use semver::Version;
+use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 use wasmtime::component::{Linker, Resource};
 
@@ -323,6 +324,92 @@ impl From<AddonViewEvent> for ui::ViewEvent {
     }
 }
 
+impl From<editor::Position> for AddonPosition {
+    fn from(position: editor::Position) -> Self {
+        Self {
+            line: position.line,
+            column: position.column,
+        }
+    }
+}
+
+impl From<editor::TextRange> for AddonTextRange {
+    fn from(range: editor::TextRange) -> Self {
+        Self {
+            start: range.start.into(),
+            end: range.end.into(),
+        }
+    }
+}
+
+impl From<editor::Severity> for AddonSeverity {
+    fn from(severity: editor::Severity) -> Self {
+        match severity {
+            editor::Severity::Error => Self::Error,
+            editor::Severity::Warning => Self::Warning,
+            editor::Severity::Info => Self::Info,
+            editor::Severity::Hint => Self::Hint,
+        }
+    }
+}
+
+impl From<editor::Decoration> for AddonDecoration {
+    fn from(decoration: editor::Decoration) -> Self {
+        match decoration {
+            editor::Decoration::Highlight((range, color)) => Self::Highlight {
+                range: range.into(),
+                color,
+            },
+            editor::Decoration::Underline((range, severity, message)) => Self::Underline {
+                range: range.into(),
+                severity: severity.into(),
+                message,
+            },
+            editor::Decoration::InlayHint((position, text)) => Self::InlayHint {
+                position: position.into(),
+                text,
+            },
+            editor::Decoration::Hover((range, markdown)) => Self::Hover {
+                range: range.into(),
+                markdown,
+            },
+            editor::Decoration::GutterIcon((line, severity, tooltip)) => Self::GutterIcon {
+                line,
+                severity: severity.into(),
+                tooltip,
+            },
+        }
+    }
+}
+
+impl editor::Host for WasmState {
+    async fn set_decorations(
+        &mut self,
+        path: String,
+        collection: String,
+        decorations: Vec<editor::Decoration>,
+    ) -> wasmtime::Result<()> {
+        let decorations = decorations.into_iter().map(Into::into).collect();
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.set_decorations(
+                extension_id,
+                PathBuf::from(path),
+                collection.into(),
+                decorations,
+                cx,
+            )
+        })
+        .await
+    }
+
+    async fn clear_decorations(&mut self, collection: String) -> wasmtime::Result<()> {
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.clear_decorations(extension_id, collection.into(), cx)
+        })
+        .await
+    }
+}
+
 impl From<ui::TreeItem> for AddonTreeItem {
     fn from(item: ui::TreeItem) -> Self {
         Self {
@@ -427,7 +514,10 @@ mod tests {
     use super::ui;
     use crate::capability_granter::CapabilityGranter;
     use crate::wasm_host::{WasmHost, WasmState};
-    use extension::{AddonStatusItem, ExtensionAddonProxy, ExtensionHostProxy, ExtensionManifest};
+    use extension::{
+        AddonDecoration, AddonStatusItem, ExtensionAddonProxy, ExtensionHostProxy,
+        ExtensionManifest,
+    };
     use fs::FakeFs;
     use gpui::{App, TestAppContext};
     use http_client::FakeHttpClient;
@@ -694,6 +784,26 @@ mod tests {
                 .lock()
                 .push(format!("open {extension_id}/{view_id} {title:?}"));
         }
+
+        fn set_decorations(
+            &self,
+            extension_id: Arc<str>,
+            path: PathBuf,
+            collection: Arc<str>,
+            decorations: Vec<AddonDecoration>,
+            _cx: &mut App,
+        ) {
+            self.calls.lock().push(format!(
+                "decorate {extension_id}/{collection} {} {decorations:?}",
+                path.display()
+            ));
+        }
+
+        fn clear_decorations(&self, extension_id: Arc<str>, collection: Arc<str>, _cx: &mut App) {
+            self.calls
+                .lock()
+                .push(format!("clear {extension_id}/{collection}"));
+        }
     }
 
     #[gpui::test]
@@ -722,6 +832,33 @@ mod tests {
         ui::Host::open_view_tab(&mut state, "dashboard".into(), "Dashboard".into())
             .await
             .unwrap();
+        let position = |line, column| super::editor::Position { line, column };
+        super::editor::Host::set_decorations(
+            &mut state,
+            "/project/main.rs".into(),
+            "lint".into(),
+            vec![super::editor::Decoration::GutterIcon((
+                3,
+                super::editor::Severity::Warning,
+                "careful".into(),
+            ))],
+        )
+        .await
+        .unwrap();
+        super::editor::Host::set_decorations(
+            &mut state,
+            "/project/main.rs".into(),
+            "lint".into(),
+            vec![super::editor::Decoration::InlayHint((
+                position(1, 2),
+                "hint".into(),
+            ))],
+        )
+        .await
+        .unwrap();
+        super::editor::Host::clear_decorations(&mut state, "lint".into())
+            .await
+            .unwrap();
 
         assert_eq!(
             recorder.calls.lock().as_slice(),
@@ -730,6 +867,9 @@ mod tests {
                 "remove stub/count",
                 "refresh stub/files",
                 r#"open stub/dashboard "Dashboard""#,
+                r#"decorate stub/lint /project/main.rs [GutterIcon { line: 3, severity: Warning, tooltip: "careful" }]"#,
+                r#"decorate stub/lint /project/main.rs [InlayHint { position: AddonPosition { line: 1, column: 2 }, text: "hint" }]"#,
+                "clear stub/lint",
             ]
         );
     }

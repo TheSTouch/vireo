@@ -492,7 +492,7 @@ fn show_hover(
                 .ok()
                 .flatten()
             };
-            let doc_link_tooltips = match doc_link_task {
+            let mut doc_link_tooltips = match doc_link_task {
                 Some(task) => task
                     .await
                     .into_iter()
@@ -506,6 +506,13 @@ fn show_hover(
                     .collect::<Vec<_>>(),
                 None => Vec::new(),
             };
+            // Vireo addon hovers show like document link tooltips.
+            if !show_debugger_hover_only {
+                let addon_hovers = this.update(cx, |editor, _| {
+                    editor.addon_hovers_at(anchor, snapshot.buffer_snapshot())
+                })?;
+                doc_link_tooltips.extend(addon_hovers);
+            }
 
             let buffer_snapshot = snapshot.buffer_snapshot();
             let mut debugger_view = None;

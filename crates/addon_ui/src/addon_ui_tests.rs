@@ -4,6 +4,8 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use collections::HashMap;
+use editor::{Editor, HighlightKey};
+use extension::{AddonDecoration, AddonPosition, AddonSeverity, AddonTextRange};
 use extension::{AddonElement, AddonElementKind, AddonTreeItem, AddonViewEvent, AddonViewTree};
 use extension::{
     AddonStatusItem, BuildTaskTemplate, CodeLabel, Command, Completion, ContextServerConfiguration,
@@ -18,6 +20,7 @@ use lsp::LanguageServerName;
 use parking_lot::Mutex;
 use project::Project;
 use task::{SpawnInTerminal, ZedDebugConfig};
+use util::path;
 use workspace::Item as _;
 use workspace::dock::{DockPosition, Panel as _};
 use workspace::{AppState, MultiWorkspace};
@@ -315,6 +318,7 @@ pub(crate) fn init_test(cx: &mut TestAppContext) -> (Arc<AppState>, Arc<Extensio
         theme_settings::init(theme::LoadThemes::JustBase, cx);
         command_palette_hooks::init(cx);
         workspace::init(app_state.clone(), cx);
+        editor::init(cx);
         let proxy = Arc::new(ExtensionHostProxy::new());
         crate::init(proxy.clone(), cx);
         (app_state, proxy)
@@ -665,4 +669,152 @@ async fn test_custom_views_open_in_editor_tabs(cx: &mut TestAppContext) {
             .lock()
             .contains(&("name".to_string(), AddonViewEvent::Change("world".into())))
     );
+}
+
+fn range(start: (u32, u32), end: (u32, u32)) -> AddonTextRange {
+    AddonTextRange {
+        start: AddonPosition {
+            line: start.0,
+            column: start.1,
+        },
+        end: AddonPosition {
+            line: end.0,
+            column: end.1,
+        },
+    }
+}
+
+fn hovers_at(
+    editor: &Entity<Editor>,
+    line: u32,
+    column: u32,
+    cx: &mut VisualTestContext,
+) -> Vec<String> {
+    editor.read_with(cx, |editor, cx| {
+        let snapshot = editor.buffer().read(cx).snapshot(cx);
+        let anchor = snapshot.anchor_before(text::Point::new(line, column));
+        editor
+            .addon_hovers_at(anchor, &snapshot)
+            .into_iter()
+            .map(|(_, text)| text.to_string())
+            .collect()
+    })
+}
+
+#[gpui::test]
+async fn test_decorations_reach_editors_showing_the_file(cx: &mut TestAppContext) {
+    let (app_state, proxy) = init_test(cx);
+    app_state
+        .fs
+        .as_fake()
+        .insert_tree(
+            path!("/project"),
+            serde_json::json!({ "main.rs": "fn main() {\n    let x = 1;\n}\n" }),
+        )
+        .await;
+    let project = Project::test(app_state.fs.clone(), [path!("/project").as_ref()], cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+    let main_rs = PathBuf::from(path!("/project/main.rs"));
+    let editor = workspace
+        .update_in(cx, |workspace, window, cx| {
+            workspace.open_abs_path(main_rs.clone(), Default::default(), window, cx)
+        })
+        .await
+        .expect("main.rs opens")
+        .downcast::<Editor>()
+        .expect("main.rs opens in an editor");
+
+    cx.update(|_, cx| {
+        proxy.set_decorations(
+            "hello-ui".into(),
+            main_rs.clone(),
+            "hello".into(),
+            vec![
+                AddonDecoration::Highlight {
+                    range: range((1, 0), (2, 0)),
+                    color: Some("#ff000080".into()),
+                },
+                AddonDecoration::Underline {
+                    range: range((1, 8), (1, 9)),
+                    severity: AddonSeverity::Warning,
+                    message: "unused `x`".into(),
+                },
+                AddonDecoration::InlayHint {
+                    position: AddonPosition { line: 1, column: 9 },
+                    text: ": i32".into(),
+                },
+                AddonDecoration::Hover {
+                    range: range((0, 3), (0, 7)),
+                    markdown: "**main**".into(),
+                },
+                AddonDecoration::GutterIcon {
+                    line: 2,
+                    severity: AddonSeverity::Info,
+                    tooltip: "the end".into(),
+                },
+            ],
+            cx,
+        );
+        // Another addon's collection lives beside it.
+        proxy.set_decorations(
+            "other-addon".into(),
+            main_rs.clone(),
+            "hello".into(),
+            vec![AddonDecoration::Hover {
+                range: range((0, 3), (0, 7)),
+                markdown: "other".into(),
+            }],
+            cx,
+        );
+    });
+    cx.run_until_parked();
+
+    editor.update_in(cx, |editor, window, cx| {
+        assert_eq!(
+            editor.display_text(cx),
+            "fn main() {\n    let x: i32 = 1;\n}\n",
+            "the inlay hint is shown"
+        );
+        let red = decorations::parse_color("#ff000080").unwrap();
+        assert!(
+            editor
+                .all_text_background_highlights(window, cx)
+                .iter()
+                .any(|(_, color)| *color == red),
+            "the highlight is shown"
+        );
+    });
+    let underlined = editor.read_with(cx, |editor, cx| {
+        (0..4)
+            .flat_map(|collection| {
+                editor
+                    .text_highlights(
+                        HighlightKey::AddonUnderline(collection, AddonSeverity::Warning as u8),
+                        cx,
+                    )
+                    .map(|(_, ranges)| ranges.len())
+            })
+            .sum::<usize>()
+    });
+    assert_eq!(underlined, 1, "the underline is shown");
+    assert_eq!(hovers_at(&editor, 0, 4, cx), ["**main**", "other"]);
+    assert_eq!(hovers_at(&editor, 1, 8, cx), ["unused `x`"]);
+    assert_eq!(hovers_at(&editor, 2, 0, cx), ["the end"]);
+
+    // Clearing a collection removes its decorations and leaves other addons' alone.
+    cx.update(|_, cx| proxy.clear_decorations("hello-ui".into(), "hello".into(), cx));
+    cx.run_until_parked();
+    assert_eq!(
+        editor.update(cx, |editor, cx| editor.display_text(cx)),
+        "fn main() {\n    let x = 1;\n}\n"
+    );
+    assert_eq!(hovers_at(&editor, 0, 4, cx), ["other"]);
+    assert!(hovers_at(&editor, 2, 0, cx).is_empty());
+
+    // Unloading an addon removes its decorations.
+    cx.update(|_, cx| proxy.unregister_addon("other-addon".into(), cx));
+    cx.run_until_parked();
+    assert!(hovers_at(&editor, 0, 4, cx).is_empty());
 }

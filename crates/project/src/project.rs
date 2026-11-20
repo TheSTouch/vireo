@@ -517,6 +517,8 @@ pub enum InlayId {
     EditPrediction(usize),
     DebuggerValue(usize),
     ReplResult(usize),
+    /// An inlay hint shown by a Vireo addon.
+    Addon(usize),
     // LSP
     Hint(usize),
     Color(usize),
@@ -530,6 +532,7 @@ impl InlayId {
             Self::Hint(id) => *id,
             Self::Color(id) => *id,
             Self::ReplResult(id) => *id,
+            Self::Addon(id) => *id,
         }
     }
 }

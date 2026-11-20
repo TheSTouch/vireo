@@ -9,6 +9,7 @@ world extension {
     import process;
     import nodejs;
     import ui;
+    import editor;
     use ui.{tree-item, view-event, view-tree};
 
     use common.{env-vars, range};

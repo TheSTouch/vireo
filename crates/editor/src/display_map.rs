@@ -167,6 +167,10 @@ pub enum HighlightKey {
     ColorizeBracket(usize),
     SemanticToken(u32),
     // below is sorted lexicographically, as there is no relevant ordering for these aside from coming after the above
+    /// Background highlights and hovers of a Vireo addon decoration collection.
+    Addon(u32),
+    /// Underlines of a Vireo addon decoration collection, one key per severity.
+    AddonUnderline(u32, u8),
     BufferSearchHighlights,
     ConsoleAnsiHighlight(usize),
     DebugStackFrameLine,

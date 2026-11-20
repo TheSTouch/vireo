@@ -4,6 +4,11 @@
 //! Commands are declared in `extension.toml` under `[commands.<id>]` and run
 //! through [`crate::Extension::run_command`].
 
+/// Editor decorations.
+pub mod editor {
+    pub use crate::wit::zed::extension::editor::*;
+}
+
 /// Status bar items, panels and views.
 pub mod ui {
     pub use crate::wit::zed::extension::ui::*;

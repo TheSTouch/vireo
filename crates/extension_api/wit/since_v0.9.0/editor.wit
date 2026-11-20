@@ -1,0 +1,47 @@
+/// Editor APIs for Vireo addons.
+///
+/// Everything in this interface is new in v0.9.0 and is specific to Vireo.
+interface editor {
+    /// A position in a file: a zero-based line and a zero-based byte column.
+    record position {
+        line: u32,
+        column: u32,
+    }
+
+    record text-range {
+        start: position,
+        end: position,
+    }
+
+    enum severity {
+        error,
+        warning,
+        info,
+        hint,
+    }
+
+    /// A decoration on a file.
+    variant decoration {
+        /// A background highlight, with an optional `#rrggbb` or `#rrggbbaa`
+        /// color. A collection's highlights share the color of its first
+        /// colored highlight.
+        highlight(tuple<text-range, option<string>>),
+        /// A wavy underline in the severity's color, with a message on hover.
+        underline(tuple<text-range, severity, string>),
+        /// Text shown inline at a position, like an inlay hint.
+        inlay-hint(tuple<position, string>),
+        /// Markdown shown when hovering the range.
+        hover(tuple<text-range, string>),
+        /// A gutter marker on a line in the severity's color, with a tooltip
+        /// shown when hovering the line.
+        gutter-icon(tuple<u32, severity, string>),
+    }
+
+    /// Replaces the decorations of the collection `collection` on the file at
+    /// the absolute path `path`. An empty list removes them. Collections are
+    /// the addon's own: other addons' collections are never touched.
+    set-decorations: func(path: string, collection: string, decorations: list<decoration>);
+
+    /// Removes the decorations of the collection `collection` from every file.
+    clear-decorations: func(collection: string);
+}

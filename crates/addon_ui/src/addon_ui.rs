@@ -2,14 +2,17 @@
 //! panels, views and editor decorations that Wasm extensions contribute
 //! through extension API v0.9.0.
 
+mod decorations;
 mod panel;
 mod status_bar;
 mod view;
 
+pub use decorations::{CollectionKey, Decorations};
 pub use panel::{AddonPanel, PANEL_SLOTS, TogglePanel};
 pub use status_bar::AddonStatusItems;
 pub use view::{AddonView, AddonViewItem};
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -18,11 +21,13 @@ use command_palette_hooks::{
     CommandPaletteExtraCommand, CommandPaletteFilter, GlobalCommandPaletteExtraCommands,
 };
 use extension::{
-    AddonContextMenuEntry, AddonPanelManifestEntry, AddonStatusItem, AddonTreeItem, AddonViewEvent,
-    AddonViewTree, Extension, ExtensionAddonProxy, ExtensionHostProxy,
+    AddonContextMenuEntry, AddonDecoration, AddonPanelManifestEntry, AddonStatusItem,
+    AddonTreeItem, AddonViewEvent, AddonViewTree, Extension, ExtensionAddonProxy,
+    ExtensionHostProxy,
 };
 use gpui::{
-    Action, App, AppContext as _, Context, Entity, EventEmitter, Global, SharedString, Task,
+    Action, App, AppContext as _, BorrowAppContext as _, Context, Entity, EventEmitter, Global,
+    SharedString, Task,
 };
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -49,6 +54,7 @@ pub fn init(proxy: Arc<ExtensionHostProxy>, cx: &mut App) {
     let registry = cx.new(|_| AddonRegistry::default());
     cx.set_global(GlobalAddonRegistry(registry));
     proxy.register_addon_proxy(AddonProxy);
+    decorations::init(cx);
 
     GlobalCommandPaletteExtraCommands::register(cx, "addon_ui", palette_commands);
     CommandPaletteFilter::update_global(cx, |filter, _| {
@@ -428,6 +434,12 @@ impl ExtensionAddonProxy for AddonProxy {
         if let Some(registry) = AddonRegistry::global(cx) {
             registry.update(cx, |registry, cx| registry.unregister(&extension_id, cx));
         }
+        if cx.has_global::<Decorations>() {
+            let paths = cx.update_global(|decorations: &mut Decorations, _| {
+                decorations.clear_extension(&extension_id)
+            });
+            decorations::refresh(Some(&paths), cx);
+        }
     }
 
     fn set_status_item(&self, extension_id: Arc<str>, item: AddonStatusItem, cx: &mut App) {
@@ -452,6 +464,37 @@ impl ExtensionAddonProxy for AddonProxy {
                 registry.refresh_view(AddonViewKey::new(extension_id, view_id), cx)
             });
         }
+    }
+
+    fn set_decorations(
+        &self,
+        extension_id: Arc<str>,
+        path: PathBuf,
+        collection: Arc<str>,
+        decorations: Vec<AddonDecoration>,
+        cx: &mut App,
+    ) {
+        if !cx.has_global::<Decorations>() {
+            return;
+        }
+        let key = CollectionKey {
+            extension_id,
+            collection,
+        };
+        cx.update_global(|all: &mut Decorations, _| all.set(key, path.clone(), decorations));
+        decorations::refresh(Some(&[path].into_iter().collect()), cx);
+    }
+
+    fn clear_decorations(&self, extension_id: Arc<str>, collection: Arc<str>, cx: &mut App) {
+        if !cx.has_global::<Decorations>() {
+            return;
+        }
+        let key = CollectionKey {
+            extension_id,
+            collection,
+        };
+        let paths = cx.update_global(|all: &mut Decorations, _| all.clear(&key));
+        decorations::refresh(Some(&paths), cx);
     }
 
     fn open_view_tab(

@@ -227,6 +227,7 @@ dependencies = [
  "command_palette_hooks",
  "editor",
  "extension",
+ "fs",
  "gpui",
  "language",
  "log",
@@ -238,10 +239,12 @@ dependencies = [
  "serde",
  "serde_json",
  "task",
+ "text",
  "theme",
  "theme_settings",
  "toml 0.9.8",
  "ui",
+ "util",
  "workspace",
 ]
 

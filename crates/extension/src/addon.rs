@@ -1,6 +1,7 @@
 //! Vireo addon contributions: the manifest entries and host types behind the
 //! addon UI API (WIT v0.9.0).
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use collections::BTreeMap;
@@ -160,6 +161,60 @@ pub struct AddonTreeItem {
     pub context_value: Option<String>,
 }
 
+/// A position in a file: a zero-based line and a zero-based byte column.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AddonPosition {
+    pub line: u32,
+    pub column: u32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AddonTextRange {
+    pub start: AddonPosition,
+    pub end: AddonPosition,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub enum AddonSeverity {
+    Error,
+    Warning,
+    Info,
+    Hint,
+}
+
+/// A decoration an addon puts on a file.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum AddonDecoration {
+    /// A background highlight. `color` is `#rrggbb` or `#rrggbbaa`.
+    Highlight {
+        range: AddonTextRange,
+        color: Option<String>,
+    },
+    /// A wavy underline in the severity's color, with the message on hover.
+    Underline {
+        range: AddonTextRange,
+        severity: AddonSeverity,
+        message: String,
+    },
+    /// Text shown inline at a position, like an inlay hint.
+    InlayHint {
+        position: AddonPosition,
+        text: String,
+    },
+    /// Markdown shown when hovering the range.
+    Hover {
+        range: AddonTextRange,
+        markdown: String,
+    },
+    /// A marker in the gutter in the severity's color, with the tooltip shown
+    /// when hovering the line.
+    GutterIcon {
+        line: u32,
+        severity: AddonSeverity,
+        tooltip: String,
+    },
+}
+
 /// A status bar item that an addon shows with `set-status-item`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AddonStatusItem {
@@ -196,6 +251,20 @@ pub trait ExtensionAddonProxy: Send + Sync + 'static {
     /// Opens one of the addon's custom views in an editor tab of the active
     /// workspace, or activates the tab that already shows it.
     fn open_view_tab(&self, extension_id: Arc<str>, view_id: Arc<str>, title: String, cx: &mut App);
+
+    /// Replaces the decorations of one of the addon's collections on one file.
+    /// An empty list removes them.
+    fn set_decorations(
+        &self,
+        extension_id: Arc<str>,
+        path: PathBuf,
+        collection: Arc<str>,
+        decorations: Vec<AddonDecoration>,
+        cx: &mut App,
+    );
+
+    /// Removes the decorations of one of the addon's collections from every file.
+    fn clear_decorations(&self, extension_id: Arc<str>, collection: Arc<str>, cx: &mut App);
 }
 
 impl ExtensionAddonProxy for ExtensionHostProxy {
@@ -245,6 +314,27 @@ impl ExtensionAddonProxy for ExtensionHostProxy {
             return;
         };
         proxy.open_view_tab(extension_id, view_id, title, cx)
+    }
+
+    fn set_decorations(
+        &self,
+        extension_id: Arc<str>,
+        path: PathBuf,
+        collection: Arc<str>,
+        decorations: Vec<AddonDecoration>,
+        cx: &mut App,
+    ) {
+        let Some(proxy) = self.addon_proxy() else {
+            return;
+        };
+        proxy.set_decorations(extension_id, path, collection, decorations, cx)
+    }
+
+    fn clear_decorations(&self, extension_id: Arc<str>, collection: Arc<str>, cx: &mut App) {
+        let Some(proxy) = self.addon_proxy() else {
+            return;
+        };
+        proxy.clear_decorations(extension_id, collection, cx)
     }
 }
 

@@ -1056,6 +1056,8 @@ pub struct Editor {
     background_highlights: HashMap<HighlightKey, BackgroundHighlight>,
     navigation_overlays: HashMap<NavigationOverlayKey, Arc<[NavigationTargetOverlay]>>,
     gutter_highlights: TypeIdHashMap<GutterHighlight>,
+    /// Hover text from Vireo addons, by decoration collection.
+    addon_hovers: HashMap<HighlightKey, Vec<(Range<Anchor>, SharedString)>>,
     allow_git_diff_scrollbar_markers: bool,
     scrollbar_marker_state: ScrollbarMarkerState,
     active_indent_guides_state: ActiveIndentGuidesState,
@@ -2446,6 +2448,7 @@ impl Editor {
             background_highlights: HashMap::default(),
             navigation_overlays: HashMap::default(),
             gutter_highlights: Default::default(),
+            addon_hovers: Default::default(),
             allow_git_diff_scrollbar_markers: false,
             scrollbar_marker_state: ScrollbarMarkerState::default(),
             active_indent_guides_state: ActiveIndentGuidesState::default(),
@@ -9613,6 +9616,43 @@ impl Editor {
         self.gutter_highlights
             .insert(TypeId::of::<T>(), (color_fetcher, ranges.into()));
         cx.notify();
+    }
+
+    /// Sets the hover text of a Vireo addon decoration collection, replacing
+    /// what the collection had before. The text is markdown.
+    pub fn set_addon_hovers(
+        &mut self,
+        key: HighlightKey,
+        hovers: Vec<(Range<Anchor>, SharedString)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.addon_hovers.insert(key, hovers);
+        cx.notify();
+    }
+
+    pub fn clear_addon_hovers(&mut self, key: HighlightKey, cx: &mut Context<Self>) {
+        if self.addon_hovers.remove(&key).is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The addon hover texts whose range contains `anchor`.
+    pub fn addon_hovers_at(
+        &self,
+        anchor: Anchor,
+        snapshot: &MultiBufferSnapshot,
+    ) -> Vec<(Range<Anchor>, SharedString)> {
+        let mut hovers: Vec<_> = self
+            .addon_hovers
+            .iter()
+            .flat_map(|(key, hovers)| hovers.iter().map(move |hover| (*key, hover)))
+            .filter(|(_, (range, _))| {
+                range.start.cmp(&anchor, snapshot).is_le()
+                    && range.end.cmp(&anchor, snapshot).is_ge()
+            })
+            .collect();
+        hovers.sort_by_key(|(key, _)| *key);
+        hovers.into_iter().map(|(_, hover)| hover.clone()).collect()
     }
 
     pub fn clear_gutter_highlights<T: 'static>(
