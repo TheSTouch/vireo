@@ -2442,6 +2442,9 @@ fn init_test(cx: &mut TestAppContext) {
         crate::init(cx);
         editor::init(cx);
     });
+    // These tests count how diagnostic blocks wrap, which depends on the
+    // editor font: keep Zed's metrics rather than Vireo's 12 px default.
+    editor::test::use_zed_buffer_metrics(cx);
 }
 
 fn randomly_update_diagnostics_for_path(
