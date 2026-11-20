@@ -1674,6 +1674,9 @@ pub struct Workspace {
     titlebar_item: Option<AnyView>,
     /// The activity bar at the window's left edge, provided by the activity_bar crate.
     activity_bar: Option<AnyView>,
+    /// The bottom panel's height before VS Code's "Maximize Panel Size",
+    /// while it is maximized.
+    bottom_dock_size_before_maximize: Option<Pixels>,
     window_tabs_item: Option<AnyView>,
     titlebar_focus_handle: FocusHandle,
     region_focus_handles: RegionFocusHandles,
@@ -2173,6 +2176,7 @@ impl Workspace {
             toast_layer,
             titlebar_item: None,
             activity_bar: None,
+            bottom_dock_size_before_maximize: None,
             window_tabs_item: None,
             titlebar_focus_handle: cx.focus_handle(),
             region_focus_handles: RegionFocusHandles::new(cx),
@@ -9474,6 +9478,25 @@ impl Workspace {
         });
     }
 
+    /// VS Code's "Maximize Panel Size": the bottom panel takes the whole
+    /// workspace height; doing it again restores the previous height.
+    pub fn toggle_maximized_bottom_dock(&mut self, window: &mut Window, cx: &mut App) {
+        if let Some(previous) = self.bottom_dock_size_before_maximize.take() {
+            self.resize_bottom_dock(previous, window, cx);
+        } else if let Some(current) = self
+            .bottom_dock
+            .read(cx)
+            .stored_active_panel_size(window, cx)
+        {
+            self.bottom_dock_size_before_maximize = Some(current);
+            self.resize_bottom_dock(self.bounds.size.height, window, cx);
+        }
+    }
+
+    pub fn is_bottom_dock_maximized(&self) -> bool {
+        self.bottom_dock_size_before_maximize.is_some()
+    }
+
     fn resize_bottom_dock(&mut self, new_size: Pixels, window: &mut Window, cx: &mut App) {
         let size = new_size.min(self.bounds.bottom() - RESIZE_HANDLE_SIZE - self.bounds.top());
         self.bottom_dock.update(cx, |bottom_dock, cx| {
@@ -10362,6 +10385,9 @@ impl Render for Workspace {
                                                             );
                                                         }
                                                         DockPosition::Bottom => {
+                                                            workspace
+                                                                .bottom_dock_size_before_maximize =
+                                                                None;
                                                             workspace.resize_bottom_dock(
                                                                 workspace.bounds.bottom()
                                                                     - e.event.position.y,
@@ -20278,6 +20304,51 @@ mod tests {
             }
         });
         item
+    }
+
+    #[gpui::test]
+    async fn test_maximize_bottom_panel_and_restore(cx: &mut gpui::TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, [], cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        cx.simulate_resize(gpui::size(px(800.), px(600.)));
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            let panel = cx.new(|cx| TestPanel::new(DockPosition::Bottom, 100, cx));
+            workspace.add_panel(panel, window, cx);
+            workspace.toggle_dock(DockPosition::Bottom, window, cx);
+        });
+        cx.run_until_parked();
+        let size = |workspace: &Entity<Workspace>, cx: &mut VisualTestContext| {
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace
+                    .bottom_dock()
+                    .read(cx)
+                    .stored_active_panel_size(window, cx)
+                    .expect("the bottom panel should be open")
+            })
+        };
+        let original = size(&workspace, cx);
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_maximized_bottom_dock(window, cx);
+            assert!(workspace.is_bottom_dock_maximized());
+        });
+        cx.run_until_parked();
+        let maximized = size(&workspace, cx);
+        assert!(
+            maximized > original,
+            "maximizing should grow the panel from {original:?}, got {maximized:?}"
+        );
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.toggle_maximized_bottom_dock(window, cx);
+            assert!(!workspace.is_bottom_dock_maximized());
+        });
+        cx.run_until_parked();
+        assert_eq!(size(&workspace, cx), original);
     }
 
     #[gpui::test]

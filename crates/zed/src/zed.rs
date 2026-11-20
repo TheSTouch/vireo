@@ -6259,6 +6259,7 @@ mod tests {
             let expected_namespaces = vec![
                 "action",
                 "activity_indicator",
+                "addon",
                 "agent",
                 "agents_sidebar",
                 "app_menu",
@@ -6271,6 +6272,7 @@ mod tests {
                 "buffer_search",
                 "call_hierarchy",
                 "channel_modal",
+                "claude_code",
                 "cli",
                 "client",
                 "collab",
@@ -6317,6 +6319,7 @@ mod tests {
                 "outline_panel",
                 "pane",
                 "picker",
+                "problems_panel",
                 "project_bookmarks",
                 "project_panel",
                 "project_search",

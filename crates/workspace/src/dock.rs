@@ -8,7 +8,7 @@ use client::proto;
 use db::kvp::KeyValueStore;
 
 use gpui::{
-    Action, Anchor, AnyView, App, Axis, Context, Entity, EntityId, EventEmitter, FocusHandle,
+    Action, Anchor, AnyView, App, Axis, Context, Div, Entity, EntityId, EventEmitter, FocusHandle,
     Focusable, IntoElement, KeyContext, MouseButton, MouseDownEvent, MouseUpEvent, ParentElement,
     Render, SharedString, StyleRefinement, Styled, Subscription, WeakEntity, Window, deferred, div,
     px,
@@ -1278,11 +1278,134 @@ impl Dock {
     }
 }
 
+/// VS Code's order for the bottom panel's views: Problems, Output, Debug
+/// Console, Terminal, then any other view.
+pub(crate) fn bottom_panel_rank(persistent_name: &str) -> usize {
+    match persistent_name {
+        "ProblemsPanel" => 0,
+        "OutputPanel" => 1,
+        "DebugConsolePanel" => 2,
+        "TerminalPanel" => 3,
+        _ => 4,
+    }
+}
+
+/// The title VS Code shows for a bottom panel view: the panel's tooltip
+/// without a trailing "Panel", or its name.
+pub(crate) fn bottom_panel_title(persistent_name: &str, tooltip: Option<&str>) -> SharedString {
+    let title = match persistent_name {
+        "TerminalPanel" => "Terminal",
+        _ => tooltip
+            .map(|tooltip| tooltip.trim_end_matches(" Panel"))
+            .unwrap_or(persistent_name),
+    };
+    SharedString::from(title.to_string())
+}
+
+impl Dock {
+    /// VS Code's panel title bar: one tab per view in VS Code's order, the
+    /// active one on a rounded fill, then maximize and close at the right.
+    fn render_bottom_panel_strip(&self, window: &mut Window, cx: &mut Context<Self>) -> Div {
+        let colors = cx.theme().colors();
+        // Today's VS Code fills the active view's tab with a translucent
+        // pill of the title text color.
+        let active_background = colors.text.opacity(0.22);
+        let maximized = self
+            .workspace
+            .upgrade()
+            .is_some_and(|workspace| workspace.read(cx).is_bottom_dock_maximized());
+        let mut views: Vec<(usize, Arc<dyn PanelHandle>)> = self
+            .panel_entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| entry.panel.enabled(cx))
+            .map(|(ix, entry)| (ix, entry.panel.clone()))
+            .collect();
+        views.sort_by_key(|(_, panel)| bottom_panel_rank(panel.persistent_name()));
+
+        let tabs = views.into_iter().map(|(ix, panel)| {
+            let active = Some(ix) == self.active_panel_index;
+            let title = bottom_panel_title(panel.persistent_name(), panel.icon_tooltip(window, cx));
+            let count = panel
+                .icon_label(window, cx)
+                .and_then(|label| label.parse::<usize>().ok());
+            h_flex()
+                .id(("bottom-panel-tab", ix))
+                .h(px(24.))
+                .px_2()
+                .gap_1()
+                .rounded(px(4.))
+                .cursor_pointer()
+                .when(active, |this| this.bg(active_background))
+                .child(Label::new(title).color(if active { Color::Default } else { Color::Muted }))
+                .children(count.map(CountBadge::new))
+                .on_click(cx.listener(move |dock, _, window, cx| {
+                    dock.activate_panel(ix, window, cx);
+                    if let Some(panel) = dock.active_panel() {
+                        panel.panel_focus_handle(cx).focus(window, cx);
+                    }
+                }))
+        });
+
+        h_flex()
+            .h(px(35.))
+            .flex_none()
+            .w_full()
+            .px_2()
+            .justify_between()
+            .child(h_flex().gap_1().children(tabs))
+            .child(
+                h_flex()
+                    .gap_0p5()
+                    .child(
+                        IconButton::new(
+                            "bottom-panel-maximize",
+                            if maximized {
+                                IconName::ChevronDown
+                            } else {
+                                IconName::ChevronUp
+                            },
+                        )
+                        .icon_size(IconSize::Small)
+                        .tooltip(Tooltip::text(if maximized {
+                            "Restore Panel Size"
+                        } else {
+                            "Maximize Panel Size"
+                        }))
+                        .on_click(cx.listener(|dock, _, window, cx| {
+                            dock.workspace
+                                .update(cx, |workspace, cx| {
+                                    workspace.toggle_maximized_bottom_dock(window, cx)
+                                })
+                                .ok();
+                            cx.notify();
+                        })),
+                    )
+                    .child(
+                        IconButton::new("bottom-panel-close", IconName::Close)
+                            .icon_size(IconSize::Small)
+                            .tooltip(|_window, cx| {
+                                Tooltip::for_action("Hide Panel", &crate::ToggleBottomDock, cx)
+                            })
+                            .on_click(cx.listener(|dock, _, window, cx| {
+                                dock.workspace
+                                    .update(cx, |workspace, cx| {
+                                        workspace.toggle_dock(DockPosition::Bottom, window, cx)
+                                    })
+                                    .ok();
+                            })),
+                    ),
+            )
+    }
+}
+
 impl Render for Dock {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dispatch_context = Self::dispatch_context(cx);
         if let Some(entry) = self.visible_entry() {
             let position = self.position;
+            let bottom_panel_strip = (position == DockPosition::Bottom)
+                .then(|| self.render_bottom_panel_strip(window, cx));
             let create_resize_handle = || {
                 let handle = div()
                     .id("resize-handle")
@@ -1362,10 +1485,14 @@ impl Render for Dock {
                     DockPosition::Right => this.border_l_1(),
                     DockPosition::Bottom => this.border_t_1(),
                 })
+                .children(bottom_panel_strip)
                 .child(
                     div()
                         .map(|this| match self.position().axis() {
                             Axis::Horizontal => this.w_full().h_full(),
+                            Axis::Vertical if position == DockPosition::Bottom => {
+                                this.flex_1().min_h_0().w_full()
+                            }
                             Axis::Vertical => this.h_full().w_full(),
                         })
                         .child(
@@ -1773,5 +1900,31 @@ pub mod test {
         fn focus_handle(&self, _cx: &App) -> FocusHandle {
             self.focus_handle.clone()
         }
+    }
+}
+
+#[cfg(test)]
+mod vireo_bottom_panel_tests {
+    use super::{bottom_panel_rank, bottom_panel_title};
+
+    #[test]
+    fn bottom_panel_views_follow_vs_code_order_and_titles() {
+        let mut names = ["TerminalPanel", "AddonPanel", "ProblemsPanel"];
+        names.sort_by_key(|name| bottom_panel_rank(name));
+        assert_eq!(names, ["ProblemsPanel", "TerminalPanel", "AddonPanel"]);
+
+        assert_eq!(
+            bottom_panel_title("TerminalPanel", Some("Terminal Panel")),
+            "Terminal"
+        );
+        assert_eq!(
+            bottom_panel_title("ProblemsPanel", Some("Problems")),
+            "Problems"
+        );
+        assert_eq!(
+            bottom_panel_title("AddonPanel", Some("Addon Panel")),
+            "Addon"
+        );
+        assert_eq!(bottom_panel_title("AddonPanel", None), "AddonPanel");
     }
 }

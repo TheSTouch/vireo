@@ -1,4 +1,5 @@
 pub mod items;
+pub mod problems_panel;
 mod toolbar_controls;
 
 mod buffer_diagnostics;
@@ -70,6 +71,7 @@ pub fn init(cx: &mut App) {
     editor::set_diagnostic_renderer(diagnostic_renderer::DiagnosticRenderer {}, cx);
     cx.observe_new(ProjectDiagnosticsEditor::register).detach();
     cx.observe_new(BufferDiagnosticsEditor::register).detach();
+    problems_panel::init(cx);
 }
 
 pub(crate) struct ProjectDiagnosticsEditor {
