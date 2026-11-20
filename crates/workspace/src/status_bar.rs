@@ -22,8 +22,9 @@ use ui::{ContextMenu, Divider, IconPosition, Indicator, Tooltip, prelude::*, rig
 const STATUS_BAR_HEIGHT: Pixels = px(22.);
 
 /// VS Code's remote indicator: the colored block at the status bar's left
-/// end, which opens the remote connection menu.
-fn render_remote_indicator(cx: &App) -> impl IntoElement {
+/// end, which opens the remote connection menu. Its fill reaches the
+/// window's bottom-left corner, so it is rounded like the window there.
+fn render_remote_indicator(round_bottom_left: bool, cx: &App) -> impl IntoElement {
     let colors = cx.theme().colors();
     let foreground = colors.status_bar_remote_foreground;
     h_flex()
@@ -31,6 +32,9 @@ fn render_remote_indicator(cx: &App) -> impl IntoElement {
         .h_full()
         .px_2()
         .bg(colors.status_bar_remote_background)
+        .when(round_bottom_left, |el| {
+            el.rounded_bl(CLIENT_SIDE_DECORATION_ROUNDING)
+        })
         .cursor_pointer()
         .child(
             Icon::new(IconName::Remote)
@@ -145,6 +149,15 @@ impl Focusable for StatusBar {
 impl Render for StatusBar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let sidebar = SidebarStatus::query(&self.multi_workspace, cx);
+        let (round_bottom_left, round_bottom_right) = match window.window_decorations() {
+            Decorations::Server => (false, false),
+            Decorations::Client { tiling, .. } => (
+                !(tiling.bottom || tiling.left)
+                    && !(sidebar.open && sidebar.side == SidebarSide::Left),
+                !(tiling.bottom || tiling.right)
+                    && !(sidebar.open && sidebar.side == SidebarSide::Right),
+            ),
+        };
 
         h_flex()
             .id("status-bar")
@@ -188,17 +201,13 @@ impl Render for StatusBar {
             .bg(cx.theme().colors().status_bar_background)
             .map(|el| match window.window_decorations() {
                 Decorations::Server => el,
-                Decorations::Client { tiling, .. } => el
-                    .when(
-                        !(tiling.bottom || tiling.right)
-                            && !(sidebar.open && sidebar.side == SidebarSide::Right),
-                        |el| el.rounded_br(CLIENT_SIDE_DECORATION_ROUNDING),
-                    )
-                    .when(
-                        !(tiling.bottom || tiling.left)
-                            && !(sidebar.open && sidebar.side == SidebarSide::Left),
-                        |el| el.rounded_bl(CLIENT_SIDE_DECORATION_ROUNDING),
-                    )
+                Decorations::Client { .. } => el
+                    .when(round_bottom_right, |el| {
+                        el.rounded_br(CLIENT_SIDE_DECORATION_ROUNDING)
+                    })
+                    .when(round_bottom_left, |el| {
+                        el.rounded_bl(CLIENT_SIDE_DECORATION_ROUNDING)
+                    })
                     // This border is to avoid a transparent gap in the rounded corners
                     .mb(px(-1.))
                     .mt({
@@ -215,7 +224,7 @@ impl Render for StatusBar {
                     .border_b(px(1.0))
                     .border_color(cx.theme().colors().status_bar_background),
             })
-            .child(self.render_left_tools(&sidebar, cx))
+            .child(self.render_left_tools(&sidebar, round_bottom_left, cx))
             .child(self.render_right_tools(&sidebar, cx))
     }
 }
@@ -224,6 +233,7 @@ impl StatusBar {
     fn render_left_tools(
         &self,
         sidebar: &SidebarStatus,
+        round_bottom_left: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         h_flex()
@@ -233,7 +243,7 @@ impl StatusBar {
             .overflow_x_hidden()
             .when(
                 crate::StatusBarSettings::get_global(cx).remote_indicator,
-                |this| this.child(render_remote_indicator(cx)),
+                |this| this.child(render_remote_indicator(round_bottom_left, cx)),
             )
             .when(
                 sidebar.show_toggle && !sidebar.open && sidebar.side == SidebarSide::Left,
