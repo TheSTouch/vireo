@@ -4,6 +4,7 @@ This repository is Vireo, a fork of Zed (see `README.md`). These rules override 
 
 * Do not add the `> [!IMPORTANT]` review banner to `README.md`. The upstream "HARD RULE" about it applies to pull requests sent to Zed, not to work in this fork. `README.md` is Vireo's public front page.
 * Vireo is a hard fork. It does not merge `upstream/main`. Put code where it fits best, editing Zed's crates freely. Borrow upstream changes by cherry-picking them, and say so in the commit.
+* Quit every app instance you launch (Vireo builds, reference editors) as soon as you are done with it, and always before you report or go idle. Stop only the processes you started.
 
 # Rust coding guidelines
 
