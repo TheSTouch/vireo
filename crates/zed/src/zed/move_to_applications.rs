@@ -73,9 +73,9 @@ impl MoveToApplicationsRequest {
         let response = cx
             .prompt(
                 PromptLevel::Info,
-                "Move Zed to Applications?",
+                "Move Vireo to Applications?",
                 Some(
-                    "Zed is running from a temporary location. Move it to Applications to finish installing it.",
+                    "Vireo is running from a temporary location. Move it to Applications to finish installing it.",
                 ),
                 &[
                     PromptButton::ok("Yes"),
@@ -90,20 +90,21 @@ impl MoveToApplicationsRequest {
                 workspace
                     .update_in(cx, |workspace, window, cx| {
                         workspace
-                            .toggle_modal(window, cx, |_window, cx| InstallingZedModal::new(cx));
+                            .toggle_modal(window, cx, |_window, cx| InstallingVireoModal::new(cx));
                     })
                     .ok();
                 if let Err(error) = move_to_applications(&self.app_path, cx).await {
                     workspace
                         .update_in(cx, |workspace, _window, cx| {
-                            if let Some(modal) = workspace.active_modal::<InstallingZedModal>(cx) {
+                            if let Some(modal) = workspace.active_modal::<InstallingVireoModal>(cx)
+                            {
                                 modal.update(cx, |modal, cx| modal.finished(cx));
                             }
                         })
                         .ok();
                     cx.prompt(
                         PromptLevel::Critical,
-                        "Failed to move Zed to Applications",
+                        "Failed to move Vireo to Applications",
                         Some(&error.to_string()),
                         &["OK"],
                     )
@@ -123,12 +124,12 @@ impl MoveToApplicationsRequest {
     }
 }
 
-pub struct InstallingZedModal {
+pub struct InstallingVireoModal {
     focus_handle: FocusHandle,
     finished: bool,
 }
 
-impl InstallingZedModal {
+impl InstallingVireoModal {
     fn new(cx: &mut Context<Self>) -> Self {
         Self {
             focus_handle: cx.focus_handle(),
@@ -142,9 +143,9 @@ impl InstallingZedModal {
     }
 }
 
-impl EventEmitter<DismissEvent> for InstallingZedModal {}
+impl EventEmitter<DismissEvent> for InstallingVireoModal {}
 
-impl ModalView for InstallingZedModal {
+impl ModalView for InstallingVireoModal {
     fn on_before_dismiss(
         &mut self,
         _window: &mut Window,
@@ -158,13 +159,13 @@ impl ModalView for InstallingZedModal {
     }
 }
 
-impl Focusable for InstallingZedModal {
+impl Focusable for InstallingVireoModal {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
     }
 }
 
-impl Render for InstallingZedModal {
+impl Render for InstallingVireoModal {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = cx.theme();
 
@@ -178,7 +179,7 @@ impl Render for InstallingZedModal {
                     .py_3()
                     .border_b_1()
                     .border_color(theme.colors().border_variant)
-                    .child(Label::new("Installing Zed…")),
+                    .child(Label::new("Installing Vireo…")),
             )
             .child(
                 h_flex()
@@ -196,9 +197,9 @@ impl Render for InstallingZedModal {
                     .child(
                         v_flex()
                             .gap_1()
-                            .child(Label::new("Moving Zed to Applications"))
+                            .child(Label::new("Moving Vireo to Applications"))
                             .child(
-                                Label::new("Zed will reopen when installation is complete.")
+                                Label::new("Vireo will reopen when installation is complete.")
                                     .size(LabelSize::Small)
                                     .color(Color::Muted),
                             ),
@@ -208,8 +209,25 @@ impl Render for InstallingZedModal {
 }
 
 fn should_offer_to_move(app_path: &Path) -> bool {
+    if is_development_build(app_path) {
+        return false;
+    }
     app_path.starts_with(Path::new("/Volumes"))
         || app_path.to_string_lossy().contains("/AppTranslocation/")
+}
+
+/// A binary built by cargo is not an installable app: it runs as a bare
+/// executable, or as a bundle inside a `target` directory. Moving it would
+/// copy a build artifact into /Applications, and Vireo's own worktrees live
+/// on external volumes, which made every dev run ask.
+fn is_development_build(app_path: &Path) -> bool {
+    let is_app_bundle = app_path
+        .extension()
+        .is_some_and(|extension| extension == "app");
+    let in_target_directory = app_path
+        .components()
+        .any(|component| component.as_os_str() == "target");
+    !is_app_bundle || in_target_directory
 }
 
 async fn move_to_applications(app_path: &Path, cx: &mut AsyncWindowContext) -> Result<()> {
@@ -328,4 +346,36 @@ fn user_applications_directory() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .map(|home| home.join("Applications"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::should_offer_to_move;
+    use std::path::Path;
+
+    #[test]
+    fn offers_to_move_an_app_running_from_a_disk_image() {
+        assert!(should_offer_to_move(Path::new("/Volumes/Vireo/Vireo.app")));
+        assert!(should_offer_to_move(Path::new(
+            "/private/var/folders/xy/T/AppTranslocation/1234/d/Vireo.app"
+        )));
+    }
+
+    #[test]
+    fn never_offers_to_move_a_development_build() {
+        assert!(!should_offer_to_move(Path::new(
+            "/Volumes/SMART/vireo/target/debug/zed"
+        )));
+        assert!(!should_offer_to_move(Path::new(
+            "/Volumes/SMART/cargo-target/vireo/debug/zed"
+        )));
+        assert!(!should_offer_to_move(Path::new(
+            "/Volumes/SMART/vireo/target/release/bundle/osx/Vireo.app"
+        )));
+    }
+
+    #[test]
+    fn does_not_offer_to_move_an_installed_app() {
+        assert!(!should_offer_to_move(Path::new("/Applications/Vireo.app")));
+    }
 }
