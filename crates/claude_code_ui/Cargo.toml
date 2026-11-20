@@ -15,12 +15,14 @@ doctest = false
 [dependencies]
 anyhow.workspace = true
 chrono.workspace = true
+claude_ide.workspace = true
 futures.workspace = true
 gpui.workspace = true
 log.workspace = true
 paths.workspace = true
 project.workspace = true
 rand.workspace = true
+release_channel.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 settings.workspace = true

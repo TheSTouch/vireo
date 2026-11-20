@@ -21,6 +21,9 @@ use crate::protocol::{
 };
 use crate::settings::ClaudeCodeSettings;
 
+/// The in-process MCP server through which a panel session gets Vireo's IDE
+/// tools, as `mcp__vireo__getDiagnostics` and `mcp__vireo__executeCode`.
+pub const SDK_MCP_SERVER: &str = "vireo";
 const AUTOSAVE_HOOK_ID: &str = "vireo_autosave";
 const AUTOSAVE_TOOLS: &str = "Read|Edit|MultiEdit|Write|NotebookEdit";
 const MAX_LOG_LINES: usize = 5000;
@@ -84,6 +87,7 @@ pub struct ClaudeSession {
     resume: Option<String>,
     fork_session: bool,
     model: Option<String>,
+    ide: Option<WeakEntity<claude_ide::ClaudeIde>>,
     _events: Option<Task<()>>,
 }
 
@@ -112,6 +116,7 @@ impl ClaudeSession {
             resume,
             fork_session: false,
             model: None,
+            ide: None,
             _events: None,
         }
     }
@@ -122,6 +127,12 @@ impl ClaudeSession {
 
     pub fn is_running(&self) -> bool {
         self.process.is_some()
+    }
+
+    /// Connects the session to the IDE server of its window, which answers the
+    /// session's `mcp__vireo__*` tool calls.
+    pub fn set_ide(&mut self, ide: Option<WeakEntity<claude_ide::ClaudeIde>>) {
+        self.ide = ide;
     }
 
     pub fn set_fork_on_start(&mut self, fork: bool) {
@@ -147,7 +158,7 @@ impl ClaudeSession {
             process_wrapper: settings.claude_process_wrapper.as_ref().map(PathBuf::from),
             python_environment,
             ide_port: None,
-            sdk_mcp_server: None,
+            sdk_mcp_server: self.ide.is_some().then(|| SDK_MCP_SERVER.to_string()),
         }
     }
 
@@ -333,21 +344,61 @@ impl ClaudeSession {
                 request_id,
                 server_name,
                 message,
-            } => {
-                let id = message.get("id").cloned().unwrap_or(Value::Null);
-                self.respond(
-                    request_id,
-                    Ok(json!({
-                        "mcp_response": {
-                            "jsonrpc": "2.0",
-                            "id": id,
-                            "error": {"code": -32601, "message": format!("Server '{server_name}' not found")}
-                        }
-                    })),
-                );
-            }
+            } => self.handle_mcp_message(request_id, server_name, message, cx),
             HostRequest::Unsupported { request_id } => {
                 self.respond(request_id, Err(anyhow!("Unsupported control request")));
+            }
+        }
+    }
+
+    fn handle_mcp_message(
+        &mut self,
+        request_id: String,
+        server_name: String,
+        message: Value,
+        cx: &mut Context<Self>,
+    ) {
+        let id = message.get("id").cloned().unwrap_or(Value::Null);
+        let ide = self.ide.as_ref().and_then(WeakEntity::upgrade);
+        let (true, Some(ide)) = (server_name == SDK_MCP_SERVER, ide) else {
+            self.respond(
+                request_id,
+                Ok(json!({"mcp_response": claude_ide::error_response(
+                    id,
+                    -32601,
+                    &format!("Server '{server_name}' not found"),
+                )})),
+            );
+            return;
+        };
+        let version = release_channel::AppVersion::global(cx).to_string();
+        match claude_ide::route_sdk_message(&message, &version) {
+            claude_ide::Route::Respond(response) => {
+                self.respond(request_id, Ok(json!({"mcp_response": response})));
+            }
+            claude_ide::Route::CallTool {
+                id,
+                name,
+                arguments,
+            } => {
+                let task = ide.update(cx, |ide, cx| ide.call_tool(&name, arguments, cx));
+                cx.spawn(async move |this, cx| {
+                    let result = task.await;
+                    this.update(cx, |this, _| {
+                        this.respond(
+                            request_id,
+                            Ok(json!({"mcp_response": claude_ide::tool_response(id, &result)})),
+                        )
+                    })
+                    .ok();
+                })
+                .detach();
+            }
+            claude_ide::Route::Connected { .. } | claude_ide::Route::Ignore => {
+                self.respond(
+                    request_id,
+                    Ok(json!({"mcp_response": {"jsonrpc": "2.0", "result": {}}})),
+                );
             }
         }
     }

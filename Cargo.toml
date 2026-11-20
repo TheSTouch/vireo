@@ -29,6 +29,7 @@ members = [
     "crates/call_hierarchy",
     "crates/channel",
     "crates/claude_code_ui",
+    "crates/claude_ide",
     "crates/cli",
     "crates/client",
     "crates/clock",
@@ -313,6 +314,7 @@ call = { path = "crates/call" }
 call_hierarchy = { path = "crates/call_hierarchy" }
 channel = { path = "crates/channel" }
 claude_code_ui = { path = "crates/claude_code_ui" }
+claude_ide = { path = "crates/claude_ide" }
 cli = { path = "crates/cli", default-features = false }
 client = { path = "crates/client" }
 clock = { path = "crates/clock" }

@@ -3017,17 +3017,47 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "claude_ide",
  "futures 0.3.34",
  "gpui",
  "log",
  "paths",
  "project",
  "rand 0.9.4",
+ "release_channel",
  "serde",
  "serde_json",
  "settings",
  "tempfile",
  "util",
+]
+
+[[package]]
+name = "claude_ide"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-tungstenite",
+ "collections",
+ "editor",
+ "futures 0.3.34",
+ "gpui",
+ "language",
+ "log",
+ "lsp",
+ "parking_lot",
+ "paths",
+ "project",
+ "rand 0.9.4",
+ "release_channel",
+ "serde",
+ "serde_json",
+ "smol",
+ "tempfile",
+ "text",
+ "url",
+ "util",
+ "workspace",
 ]
 
 [[package]]

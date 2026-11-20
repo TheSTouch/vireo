@@ -11,4 +11,5 @@ pub use crate::settings::ClaudeCodeSettings;
 
 pub fn init(cx: &mut App) {
     ClaudeCodeSettings::register(cx);
+    claude_ide::init(cx);
 }

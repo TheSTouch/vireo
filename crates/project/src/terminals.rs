@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use collections::HashMap;
-use gpui::{App, AppContext as _, Context, Entity, Task, WeakEntity};
+use gpui::{App, AppContext as _, Context, Entity, EntityId, Global, Task, WeakEntity};
 
 use futures::{FutureExt, future::Shared};
 use itertools::Itertools as _;
@@ -29,7 +29,33 @@ pub struct Terminals {
     pub(crate) local_handles: Vec<WeakEntity<terminal::Terminal>>,
 }
 
+/// Environment variables that integrations add to every terminal of one
+/// project, such as the port of the Claude Code IDE server for that window.
+#[derive(Default)]
+struct ExtraTerminalEnvironment(HashMap<EntityId, HashMap<String, String>>);
+
+impl Global for ExtraTerminalEnvironment {}
+
 impl Project {
+    /// Sets environment variables for terminals created from now on in this
+    /// project. An empty map removes them.
+    pub fn set_extra_terminal_env(&self, env: HashMap<String, String>, cx: &mut Context<Self>) {
+        let project_id = cx.entity_id();
+        let extra = cx.default_global::<ExtraTerminalEnvironment>();
+        if env.is_empty() {
+            extra.0.remove(&project_id);
+        } else {
+            extra.0.insert(project_id, env);
+        }
+    }
+
+    pub fn extra_terminal_env(&self, cx: &Context<Self>) -> HashMap<String, String> {
+        cx.try_global::<ExtraTerminalEnvironment>()
+            .and_then(|extra| extra.0.get(&cx.entity_id()))
+            .cloned()
+            .unwrap_or_default()
+    }
+
     pub fn active_entry_directory(&self, cx: &App) -> Option<PathBuf> {
         let entry_id = self.active_entry()?;
         let worktree = self.worktree_for_entry(entry_id, cx)?;
@@ -90,7 +116,8 @@ impl Project {
                 path: RelPath::empty(),
             });
         }
-        let settings = TerminalSettings::get(settings_location, cx).clone();
+        let mut settings = TerminalSettings::get(settings_location, cx).clone();
+        settings.env.extend(self.extra_terminal_env(cx));
         let detect_venv = settings.detect_venv.as_option().is_some();
 
         let terminal_mode = TerminalMode::task(spawn_task.clone());
@@ -328,7 +355,8 @@ impl Project {
                 path: RelPath::empty(),
             });
         }
-        let settings = TerminalSettings::get(settings_location, cx).clone();
+        let mut settings = TerminalSettings::get(settings_location, cx).clone();
+        settings.env.extend(self.extra_terminal_env(cx));
         let detect_venv = settings.detect_venv.as_option().is_some();
         let local_path = if is_via_remote { None } else { path.clone() };
 

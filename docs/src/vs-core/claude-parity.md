@@ -46,7 +46,7 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.installPlugin` | Install Plugin | Installs a Claude Code plugin by name. | `claude_code::InstallPlugin` | B-8 | Todo |
 | `claude-code.acceptProposedDiff` | Accept Proposed Changes | Terminal-mode (`/ide`) variant: accepts a diff opened by `openDiff`. | `claude_code::AcceptProposedDiff` (same action) | B-5 | Todo |
 | `claude-code.rejectProposedDiff` | Reject Proposed Changes | Terminal-mode variant. | `claude_code::RejectProposedDiff` (same action) | B-5 | Todo |
-| `claude-code.insertAtMentioned` | Insert At-Mentioned | Terminal mode: sends an `at_mentioned` notification to the connected CLI. | `claude_code::InsertAtMentioned` | B-3 | Todo |
+| `claude-code.insertAtMentioned` | Insert At-Mentioned | Terminal mode: sends an `at_mentioned` notification to the connected CLI. | `claude_code::InsertAtMentioned` | B-3 | Todo: the server sends `at_mentioned`; the action lands with B-4 |
 | `claude-vscode.showLogs` | Show Logs | Opens the extension's log channel. | `claude_code::ShowLogs` | B-8 | Todo |
 | `claude-vscode.toggleFocusView` | Toggle Focus view | Hides tool calls and activity, showing only prompts and replies. | `claude_code::ToggleFocusView` | B-4 | Todo |
 | `claude-vscode.openWalkthrough` | Open Walkthrough | Opens the "Get started" walkthrough. | `claude_code::OpenWalkthrough` | B-8 | Todo |
@@ -224,25 +224,38 @@ its name and version.
 
 | Tool | Input | Result | Vireo | Status |
 | --- | --- | --- | --- | --- |
-| `openDiff` | `old_file_path`, `new_file_path`, `new_file_contents`, `tab_name` (all required) | Blocks until the user decides. `FILE_SAVED` followed by the final contents, or `DIFF_REJECTED` followed by the tab name. | Opens the proposed-diff view (B-5) | Todo |
-| `getDiagnostics` | `uri` (optional `file://` URI) | Pretty-printed JSON array, one entry per file: `[{"uri": "file:///…", "diagnostics": [{"message", "severity", "range": {"start": {"line", "character"}, "end": …}, "source", "code"}]}]`. The outer shape was observed; the item fields follow the public notes and VS Code's diagnostic type (0-based lines; severity `Error`, `Warning`, `Information` or `Hint`). | Project diagnostics | Todo |
-| `close_tab` | `tab_name` | `TAB_CLOSED` | Closes the diff with that name | Todo |
-| `closeAllDiffTabs` | none | `CLOSED_<n>_DIFF_TABS` | Closes every proposed diff | Todo |
-| `executeCode` | `code` | Text and image items from the kernel | Runs code in the REPL kernel of the active notebook / REPL editor | Todo |
+| `openDiff` | `old_file_path`, `new_file_path`, `new_file_contents`, `tab_name` (all required) | Blocks until the user decides. `FILE_SAVED` followed by the final contents, or `DIFF_REJECTED` followed by the tab name. | Opens the proposed-diff view; served once the diff view lands (B-5) | Todo |
+| `getDiagnostics` | `uri` (optional `file://` URI) | Pretty-printed JSON array, one entry per file: `[{"uri": "file:///…", "diagnostics": [{"message", "severity", "range": {"start": {"line", "character"}, "end": …}, "source", "code"}]}]`. The outer shape was observed; the item fields follow the public notes and VS Code's diagnostic type (0-based lines; severity `Error`, `Warning`, `Information` or `Hint`). | Diagnostics of the project's language servers, for one file or all files with diagnostics | Done |
+| `close_tab` | `tab_name` | `TAB_CLOSED` | Closes the proposed diff with that name | Done |
+| `closeAllDiffTabs` | none | `CLOSED_<n>_DIFF_TABS` | Closes every proposed diff | Done |
+| `executeCode` | `code` | Text and image items from the kernel | Runs through a registered code executor; none is registered yet, so it answers that no Jupyter kernel is available | Partial |
 
 Earlier versions also served `openFile`, `getCurrentSelection`, `getLatestSelection`,
 `getOpenEditors`, `getWorkspaceFolders`, `checkDocumentDirty` and `saveDocument`. Vireo serves
-them too, for older CLIs.
+them too, for older CLIs (done).
+
+**Handshake details found by observing the CLI (2.1.329).** The CLI connects to `/` with
+`sec-websocket-protocol: mcp`, `user-agent: claude-code/<version> (cli)` and the auth header. A
+server that does not select the `mcp` subprotocol is dropped, and the CLI shows the IDE as
+"disconnected".
+
+**Panel sessions.** Like the extension, the panel does not give its own `claude` the WebSocket
+port, which would make the CLI open a second diff next to the permission prompt. It declares an
+in-process MCP server named `vireo` with `--mcp-config` and answers its `mcp_message` requests
+itself, serving `getDiagnostics` and `executeCode` as `mcp__vireo__*` tools (done).
+
+**Terminals.** Each window's terminals get `CLAUDE_CODE_SSE_PORT` and `ENABLE_IDE_INTEGRATION`
+through a per-project extra terminal environment in the `project` crate (done).
 
 **Notifications.**
 
 | Direction | Method | Params | Status |
 | --- | --- | --- | --- |
-| IDE → CLI | `selection_changed` | `text`, `filePath`, `fileUrl`, `selection: {start: {line, character}, end: {line, character}, isEmpty}`; 0-based | Todo |
-| IDE → CLI | `at_mentioned` | `filePath`, `lineStart`, `lineEnd` (0-based) | Todo |
-| CLI → IDE | `ide_connected` | `pid` | Todo |
+| IDE → CLI | `selection_changed` | `text`, `filePath`, `fileUrl`, `selection: {start: {line, character}, end: {line, character}, isEmpty}`; 0-based; sent 50 ms after the selection of a file editor changes | Done |
+| IDE → CLI | `at_mentioned` | `filePath`, `lineStart`, `lineEnd` (0-based) | Done |
+| CLI → IDE | `ide_connected` | `pid` | Done |
 
 | Behaviour | Item | Status |
 | --- | --- | --- |
-| Vireo is listed by `/ide` and `claude` in its terminal connects | B-3 | Todo |
-| Selections and diagnostics reach Claude | B-3 | Todo |
+| Vireo is listed by `/ide` and `claude` in its terminal connects (the server selects the `mcp` WebSocket subprotocol the CLI asks for) | B-3 | Done |
+| Selections and diagnostics reach Claude | B-3 | Done |
