@@ -21492,6 +21492,12 @@ mod tests {
     #[gpui::test]
     async fn test_panel_buttons_work_while_dock_is_zoomed(cx: &mut gpui::TestAppContext) {
         init_test(cx);
+        // Vireo hides the status bar's panel buttons by default.
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.status_bar.get_or_insert_default().panel_buttons = Some(true);
+            });
+        });
         let fs = FakeFs::new(cx.executor());
         let project = Project::test(fs, [], cx).await;
         // Workspace actions are registered on the `MultiWorkspace` root, so a bare `Workspace`

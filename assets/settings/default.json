@@ -841,7 +841,7 @@
   // Search options to enable by default when opening new project and buffer searches.
   "search": {
     // Whether to show the project search button in the status bar.
-    "button": true,
+    "button": false,
     // Whether to only match on whole words.
     "whole_word": false,
     // Whether to match case sensitively.
@@ -2160,6 +2160,13 @@
     // If the input has a timeout, a countdown is shown and hovering pauses it.
     // Its binding preview popover is disabled when "which_key.enabled" is true.
     "pending_keystrokes_indicator": true,
+    // Whether to show the remote indicator at the left end of the status bar.
+    "remote_indicator": true,
+    // Whether to show the current git branch and its sync state.
+    "branch_button": true,
+    // Whether to show the buttons that toggle the bottom and right dock
+    // panels. Vireo toggles them from the title bar and the activity bar.
+    "panel_buttons": false,
   },
   // Settings specific to the terminal
   "terminal": {
@@ -2902,7 +2909,7 @@
   // Common language server settings.
   "global_lsp_settings": {
     // Whether to show the LSP servers button in the status bar.
-    "button": true,
+    "button": false,
     // The maximum amount of time to wait for responses from language servers, in seconds.
     // A value of 0 will result in no timeout being applied.
     //

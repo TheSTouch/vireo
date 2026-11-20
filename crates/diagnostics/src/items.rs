@@ -8,11 +8,11 @@ use gpui::{
 use language::Diagnostic;
 use project::project_settings::{GoToDiagnosticSeverityFilter, ProjectSettings};
 use settings::Settings;
-use ui::{Button, ButtonLike, Color, Icon, IconName, Label, Tooltip, h_flex, prelude::*};
+use ui::{Button, ButtonLike, Icon, IconName, Label, Tooltip, h_flex, prelude::*};
 use util::ResultExt;
 use workspace::{HideStatusItem, StatusItemView, ToolbarItemEvent, Workspace, item::ItemHandle};
 
-use crate::{Deploy, IncludeWarnings, ProjectDiagnosticsEditor};
+use crate::IncludeWarnings;
 
 /// The status bar item that displays diagnostic counts.
 pub struct DiagnosticIndicator {
@@ -33,31 +33,14 @@ impl Render for DiagnosticIndicator {
             return indicator.hidden();
         }
 
-        let diagnostic_indicator = match (self.summary.error_count, self.summary.warning_count) {
-            (0, 0) => h_flex().child(
-                Icon::new(IconName::Check)
-                    .size(IconSize::Small)
-                    .color(Color::Default),
-            ),
-            (error_count, warning_count) => h_flex()
-                .gap_1()
-                .when(error_count > 0, |this| {
-                    this.child(
-                        Icon::new(IconName::XCircle)
-                            .size(IconSize::Small)
-                            .color(Color::Error),
-                    )
-                    .child(Label::new(error_count.to_string()).size(LabelSize::Small))
-                })
-                .when(warning_count > 0, |this| {
-                    this.child(
-                        Icon::new(IconName::Warning)
-                            .size(IconSize::Small)
-                            .color(Color::Warning),
-                    )
-                    .child(Label::new(warning_count.to_string()).size(LabelSize::Small))
-                }),
-        };
+        // VS Code always shows both counts, in the status bar's own color:
+        // "(x) 0 /!\ 0".
+        let diagnostic_indicator = h_flex()
+            .gap_1()
+            .child(Icon::new(IconName::XCircle).size(IconSize::Small))
+            .child(Label::new(self.summary.error_count.to_string()).size(LabelSize::Small))
+            .child(Icon::new(IconName::Warning).size(IconSize::Small))
+            .child(Label::new(self.summary.warning_count.to_string()).size(LabelSize::Small));
 
         let status = if let Some(diagnostic) = &self.current_diagnostic {
             let message = diagnostic
@@ -118,7 +101,11 @@ impl Render for DiagnosticIndicator {
                     .tab_index(0isize)
                     .aria_label(diagnostics_label)
                     .tooltip(move |_window, cx| {
-                        Tooltip::for_action("Project Diagnostics", &Deploy, cx)
+                        Tooltip::for_action(
+                            "Toggle Problems",
+                            &crate::problems_panel::ToggleFocus,
+                            cx,
+                        )
                     })
                     .on_click(cx.listener(|this, _, window, cx| {
                         if let Some(workspace) = this.workspace.upgrade() {
@@ -127,13 +114,12 @@ impl Render for DiagnosticIndicator {
                                     |show_warnings: &mut IncludeWarnings, _| show_warnings.0 = true,
                                 );
                             }
+                            // As in VS Code, the counts open the Problems panel.
                             workspace.update(cx, |workspace, cx| {
-                                ProjectDiagnosticsEditor::deploy(
-                                    workspace,
-                                    &Default::default(),
-                                    window,
-                                    cx,
-                                )
+                                workspace
+                                    .toggle_panel_focus::<crate::problems_panel::ProblemsPanel>(
+                                        window, cx,
+                                    );
                             })
                         }
                     })),

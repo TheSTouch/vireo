@@ -923,6 +923,9 @@ impl VsCodeSettings {
             line_endings_button: None,
             active_encoding_button: None,
             pending_keystrokes_indicator: None,
+            remote_indicator: None,
+            branch_button: None,
+            panel_buttons: None,
         })
     }
 

@@ -1527,6 +1527,11 @@ impl PanelButtons {
 
 impl Render for PanelButtons {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Vireo toggles docks from the title bar and the activity bar; the
+        // status bar buttons come back with `status_bar.panel_buttons`.
+        if !crate::StatusBarSettings::get_global(cx).panel_buttons {
+            return h_flex();
+        }
         let dock = self.dock.read(cx);
         let active_index = dock.active_panel_index;
         let is_open = dock.is_open;

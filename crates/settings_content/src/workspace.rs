@@ -591,6 +591,21 @@ pub struct StatusBarSettingsContent {
     ///
     /// Default: true
     pub pending_keystrokes_indicator: Option<bool>,
+    /// Whether to show VS Code's remote indicator at the left end of the
+    /// status bar.
+    ///
+    /// Default: true
+    pub remote_indicator: Option<bool>,
+    /// Whether to show the current git branch and its sync state in the
+    /// status bar.
+    ///
+    /// Default: true
+    pub branch_button: Option<bool>,
+    /// Whether to show the buttons that toggle the bottom and right dock
+    /// panels in the status bar.
+    ///
+    /// Default: false
+    pub panel_buttons: Option<bool>,
 }
 
 #[derive(

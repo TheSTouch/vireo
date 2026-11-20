@@ -7,7 +7,6 @@ use ui::{
     Button, ButtonCommon, Clickable, Context, FluentBuilder, IntoElement, LabelSize, ParentElement,
     Render, Tooltip, Window, div,
 };
-use util::paths::FILE_ROW_COLUMN_DELIMITER;
 use workspace::{HideStatusItem, StatusBarSettings, StatusItemView, Workspace, item::ItemHandle};
 
 #[derive(Copy, Clone, Debug, Default, PartialOrd, PartialEq)]
@@ -207,6 +206,14 @@ impl CursorPosition {
     }
 }
 
+/// The cursor position as VS Code's status bar shows it: "Ln 12, Col 5".
+pub fn cursor_position_text(
+    line: impl std::fmt::Display,
+    column: impl std::fmt::Display,
+) -> String {
+    format!("Ln {line}, Col {column}")
+}
+
 impl Render for CursorPosition {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if !StatusBarSettings::get_global(cx).cursor_position_button {
@@ -214,10 +221,7 @@ impl Render for CursorPosition {
         }
 
         div().when_some(self.position, |el, position| {
-            let mut text = format!(
-                "{}{FILE_ROW_COLUMN_DELIMITER}{}",
-                position.line, position.character,
-            );
+            let mut text = cursor_position_text(position.line, position.character);
             self.write_position(&mut text, cx);
 
             let context = self.context.clone();
@@ -324,5 +328,16 @@ impl From<settings::LineIndicatorFormat> for LineIndicatorFormat {
 impl Settings for LineIndicatorFormat {
     fn from_settings(content: &settings::SettingsContent) -> Self {
         content.line_indicator_format.unwrap().into()
+    }
+}
+
+#[cfg(test)]
+mod vireo_tests {
+    use super::cursor_position_text;
+
+    #[test]
+    fn cursor_position_reads_like_vs_code() {
+        assert_eq!(cursor_position_text(1, 1), "Ln 1, Col 1");
+        assert_eq!(cursor_position_text(120, 42), "Ln 120, Col 42");
     }
 }

@@ -290,6 +290,17 @@ mod vireo_layout_defaults {
     }
 
     #[test]
+    fn status_bar_matches_vs_code() {
+        let defaults = defaults();
+        assert_default(&defaults, "/status_bar/remote_indicator", json!(true));
+        assert_default(&defaults, "/status_bar/branch_button", json!(true));
+        // Zed-only status bar buttons stay available behind settings.
+        assert_default(&defaults, "/status_bar/panel_buttons", json!(false));
+        assert_default(&defaults, "/search/button", json!(false));
+        assert_default(&defaults, "/global_lsp_settings/button", json!(false));
+    }
+
+    #[test]
     fn title_bar_matches_vs_code() {
         let defaults = defaults();
         assert_default(&defaults, "/title_bar/show_command_center", json!(true));

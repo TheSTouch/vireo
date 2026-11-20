@@ -6,7 +6,7 @@ use gpui::{
     Anchor, AnyView, App, Context, Decorations, Entity, FocusHandle, Focusable, IntoElement,
     ParentElement, Render, Role, SharedString, Styled, Subscription, WeakEntity, Window,
 };
-use settings::{SettingsContent, update_settings_file};
+use settings::{Settings as _, SettingsContent, update_settings_file};
 use std::{any::TypeId, sync::Arc};
 use theme::CLIENT_SIDE_DECORATION_ROUNDING;
 use ui::{ContextMenu, Divider, IconPosition, Indicator, Tooltip, prelude::*, right_click_menu};
@@ -19,6 +19,36 @@ use ui::{ContextMenu, Divider, IconPosition, Indicator, Tooltip, prelude::*, rig
 /// already conditional on some other setting exposed elsewhere (e.g., the
 /// activity indicator, which disappears on its own once there's no work to
 /// display).
+const STATUS_BAR_HEIGHT: Pixels = px(22.);
+
+/// VS Code's remote indicator: the colored block at the status bar's left
+/// end, which opens the remote connection menu.
+fn render_remote_indicator(cx: &App) -> impl IntoElement {
+    let colors = cx.theme().colors();
+    let foreground = colors.status_bar_remote_foreground;
+    h_flex()
+        .id("remote-indicator")
+        .h_full()
+        .px_2()
+        .bg(colors.status_bar_remote_background)
+        .cursor_pointer()
+        .child(
+            Icon::new(IconName::Remote)
+                .size(IconSize::Small)
+                .color(Color::Custom(foreground)),
+        )
+        .tooltip(|_window, cx| {
+            Tooltip::for_action(
+                "Open a Remote Window",
+                &zed_actions::OpenRemote::default(),
+                cx,
+            )
+        })
+        .on_click(|_, window, cx| {
+            window.dispatch_action(Box::new(zed_actions::OpenRemote::default()), cx)
+        })
+}
+
 #[derive(Clone)]
 pub struct HideStatusItem {
     hide: Arc<dyn Fn(&mut SettingsContent) + Send + Sync>,
@@ -148,9 +178,13 @@ impl Render for StatusBar {
                 }),
             )
             .w_full()
+            // VS Code's status bar is 22 px tall, its items flush with the
+            // window's edges.
+            .h(STATUS_BAR_HEIGHT)
+            .flex_none()
             .justify_between()
             .gap(DynamicSpacing::Base08.rems(cx))
-            .p(DynamicSpacing::Base04.rems(cx))
+            .pr(DynamicSpacing::Base04.rems(cx))
             .bg(cx.theme().colors().status_bar_background)
             .map(|el| match window.window_decorations() {
                 Decorations::Server => el,
@@ -193,9 +227,14 @@ impl StatusBar {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         h_flex()
+            .h_full()
             .gap_1()
             .min_w_0()
             .overflow_x_hidden()
+            .when(
+                crate::StatusBarSettings::get_global(cx).remote_indicator,
+                |this| this.child(render_remote_indicator(cx)),
+            )
             .when(
                 sidebar.show_toggle && !sidebar.open && sidebar.side == SidebarSide::Left,
                 |this| this.child(self.render_sidebar_toggle(sidebar, cx)),
