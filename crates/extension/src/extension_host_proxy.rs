@@ -32,6 +32,7 @@ pub struct ExtensionHostProxy {
     context_server_proxy: RwLock<Option<Arc<dyn ExtensionContextServerProxy>>>,
     debug_adapter_provider_proxy: RwLock<Option<Arc<dyn ExtensionDebugAdapterProviderProxy>>>,
     language_model_provider_proxy: RwLock<Option<Arc<dyn ExtensionLanguageModelProviderProxy>>>,
+    addon_proxy: RwLock<Option<Arc<dyn crate::ExtensionAddonProxy>>>,
 }
 
 impl ExtensionHostProxy {
@@ -57,6 +58,7 @@ impl ExtensionHostProxy {
             context_server_proxy: RwLock::default(),
             debug_adapter_provider_proxy: RwLock::default(),
             language_model_provider_proxy: RwLock::default(),
+            addon_proxy: RwLock::default(),
         }
     }
 
@@ -88,6 +90,14 @@ impl ExtensionHostProxy {
         self.debug_adapter_provider_proxy
             .write()
             .replace(Arc::new(proxy));
+    }
+
+    pub fn register_addon_proxy(&self, proxy: impl crate::ExtensionAddonProxy) {
+        self.addon_proxy.write().replace(Arc::new(proxy));
+    }
+
+    pub fn addon_proxy(&self) -> Option<Arc<dyn crate::ExtensionAddonProxy>> {
+        self.addon_proxy.read().clone()
     }
 
     pub fn register_language_model_provider_proxy(

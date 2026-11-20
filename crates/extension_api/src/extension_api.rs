@@ -281,6 +281,15 @@ pub trait Extension: Send + Sync {
     ) -> Result<DebugRequest, String> {
         Err("`run_dap_locator` not implemented".to_string())
     }
+
+    /// Runs one of the commands declared under `[commands.<id>]` in `extension.toml`.
+    ///
+    /// Commands appear in the command palette as "<extension name>: <title>" and can be
+    /// bound in a keymap with
+    /// `["addon::RunCommand", { "extension": "<extension id>", "command": "<id>" }]`.
+    fn run_command(&mut self, command_id: &str, _args: Vec<String>) -> Result<(), String> {
+        Err(format!("command `{command_id}` is not implemented"))
+    }
 }
 
 /// Registers the provided type as a Zed extension.
@@ -558,6 +567,10 @@ impl wit::Guest for Component {
         build_task: TaskTemplate,
     ) -> Result<DebugRequest, String> {
         extension().run_dap_locator(locator_name, build_task)
+    }
+
+    fn run_command(command_id: String, args: Vec<String>) -> Result<(), String> {
+        extension().run_command(&command_id, args)
     }
 }
 

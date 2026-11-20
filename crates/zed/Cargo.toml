@@ -68,6 +68,7 @@ acp_thread.workspace = true
 acp_tools.workspace = true
 action_log = { workspace = true, optional = true }
 activity_indicator.workspace = true
+addon_ui.workspace = true
 agent-client-protocol.workspace = true
 agent.workspace = true
 agent_servers = { workspace = true, optional = true }

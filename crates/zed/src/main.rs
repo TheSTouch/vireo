@@ -678,6 +678,7 @@ fn main() {
             app_state.node_runtime.clone(),
             cx,
         );
+        addon_ui::init(extension_host_proxy.clone(), cx);
 
         theme_settings::init(theme::LoadThemes::All(Box::new(Assets)), cx);
         eager_load_active_theme_and_icon_theme(fs.clone(), cx);

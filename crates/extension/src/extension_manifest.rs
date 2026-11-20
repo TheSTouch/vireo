@@ -124,6 +124,9 @@ pub struct ExtensionManifest {
     pub debug_locators: BTreeMap<Arc<str>, DebugLocatorManifestEntry>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub language_model_providers: BTreeMap<Arc<str>, LanguageModelProviderManifestEntry>,
+    /// Vireo addon UI contributions.
+    #[serde(flatten)]
+    pub addon: crate::AddonManifest,
 }
 
 impl ExtensionManifest {
@@ -522,6 +525,7 @@ fn manifest_from_old_manifest(
         debug_adapters: Default::default(),
         debug_locators: Default::default(),
         language_model_providers: Default::default(),
+        addon: Default::default(),
     }
 }
 
@@ -556,6 +560,7 @@ mod tests {
             debug_adapters: Default::default(),
             debug_locators: Default::default(),
             language_model_providers: BTreeMap::default(),
+            addon: Default::default(),
         }
     }
 

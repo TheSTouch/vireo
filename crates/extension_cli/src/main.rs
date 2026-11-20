@@ -118,7 +118,7 @@ async fn main() -> Result<()> {
 
     validate_extension_manifest(&manifest)?;
     let extension_provides = manifest.provides();
-    validate_extension_features(&extension_provides)?;
+    validate_extension_features(&extension_provides, !manifest.addon.is_empty())?;
 
     let cx = TestingContext::new(&manifest, &extension_path);
     let grammars = test_grammars(&manifest, &extension_path, &mut wasm_store)?;
@@ -209,8 +209,9 @@ enum ExtensionFeatureError {
 
 fn validate_extension_features(
     provides: &BTreeSet<ExtensionProvides>,
+    provides_addon_ui: bool,
 ) -> Result<(), ExtensionFeatureError> {
-    if provides.is_empty() {
+    if provides.is_empty() && !provides_addon_ui {
         return Err(ExtensionFeatureError::NoFeatures);
     }
 
@@ -561,6 +562,7 @@ mod tests {
             debug_adapters: BTreeMap::default(),
             debug_locators: BTreeMap::default(),
             language_model_providers: BTreeMap::default(),
+            addon: Default::default(),
         }
     }
 
@@ -749,10 +751,15 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_addon_ui_only() {
+        assert_eq!(validate_extension_features(&BTreeSet::new(), true), Ok(()));
+    }
+
+    #[test]
     fn test_validate_empty_features() {
         let provides = BTreeSet::new();
         assert_eq!(
-            validate_extension_features(&provides),
+            validate_extension_features(&provides, false),
             Err(ExtensionFeatureError::NoFeatures),
         );
     }
@@ -760,20 +767,20 @@ mod tests {
     #[test]
     fn test_validate_single_language_feature() {
         let provides = BTreeSet::from([ExtensionProvides::Languages]);
-        assert_eq!(validate_extension_features(&provides), Ok(()));
+        assert_eq!(validate_extension_features(&provides, false), Ok(()));
     }
 
     #[test]
     fn test_validate_single_themes_feature() {
         let provides = BTreeSet::from([ExtensionProvides::Themes]);
-        assert_eq!(validate_extension_features(&provides), Ok(()));
+        assert_eq!(validate_extension_features(&provides, false), Ok(()));
     }
 
     #[test]
     fn test_validate_themes_with_other_features() {
         let provides = BTreeSet::from([ExtensionProvides::Themes, ExtensionProvides::Languages]);
         assert_eq!(
-            validate_extension_features(&provides),
+            validate_extension_features(&provides, false),
             Err(ExtensionFeatureError::ThemesMixedWithOtherFeatures),
         );
     }
@@ -781,14 +788,14 @@ mod tests {
     #[test]
     fn test_validate_single_icon_themes_feature() {
         let provides = BTreeSet::from([ExtensionProvides::IconThemes]);
-        assert_eq!(validate_extension_features(&provides), Ok(()));
+        assert_eq!(validate_extension_features(&provides, false), Ok(()));
     }
 
     #[test]
     fn test_validate_icon_themes_with_other_features() {
         let provides = BTreeSet::from([ExtensionProvides::IconThemes, ExtensionProvides::Grammars]);
         assert_eq!(
-            validate_extension_features(&provides),
+            validate_extension_features(&provides, false),
             Err(ExtensionFeatureError::IconThemesMixedWithOtherFeatures),
         );
     }
@@ -797,7 +804,7 @@ mod tests {
     fn test_validate_slash_commands_only() {
         let provides = BTreeSet::from([ExtensionProvides::SlashCommands]);
         assert_eq!(
-            validate_extension_features(&provides),
+            validate_extension_features(&provides, false),
             Err(ExtensionFeatureError::SlashCommandsDeprecated { sole_feature: true }),
         );
     }
@@ -809,7 +816,7 @@ mod tests {
             ExtensionProvides::Languages,
         ]);
         assert_eq!(
-            validate_extension_features(&provides),
+            validate_extension_features(&provides, false),
             Err(ExtensionFeatureError::SlashCommandsDeprecated {
                 sole_feature: false
             }),
@@ -823,6 +830,6 @@ mod tests {
             ExtensionProvides::Grammars,
             ExtensionProvides::LanguageServers,
         ]);
-        assert_eq!(validate_extension_features(&provides), Ok(()));
+        assert_eq!(validate_extension_features(&provides, false), Ok(()));
     }
 }

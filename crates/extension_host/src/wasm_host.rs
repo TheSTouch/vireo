@@ -537,6 +537,19 @@ impl extension::Extension for WasmExtension {
         })
         .await?
     }
+
+    async fn run_addon_command(&self, command_id: Arc<str>, args: Vec<String>) -> Result<()> {
+        self.call(move |extension, store| {
+            async move {
+                extension
+                    .call_run_command(store, &command_id, &args)
+                    .await?
+                    .map_err(|error| store.data().extension_error(error))
+            }
+            .boxed()
+        })
+        .await?
+    }
 }
 
 pub struct WasmState {

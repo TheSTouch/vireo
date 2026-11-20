@@ -151,3 +151,41 @@ impl GlobalCommandPaletteInterceptor {
         Some(handler(query, workspace, cx))
     }
 }
+
+/// A command contributed to the command palette by something other than an
+/// action type, such as a Vireo addon.
+pub struct CommandPaletteExtraCommand {
+    /// The name shown in the command palette.
+    pub name: String,
+    /// The action dispatched when the command is confirmed.
+    pub action: Box<dyn Action>,
+}
+
+/// Providers of extra command palette commands, keyed by provider name.
+#[derive(Default)]
+pub struct GlobalCommandPaletteExtraCommands(
+    collections::HashMap<&'static str, Rc<dyn Fn(&App) -> Vec<CommandPaletteExtraCommand>>>,
+);
+
+impl Global for GlobalCommandPaletteExtraCommands {}
+
+impl GlobalCommandPaletteExtraCommands {
+    /// Registers a provider, replacing any earlier provider with the same name.
+    pub fn register(
+        cx: &mut App,
+        provider_name: &'static str,
+        provider: impl Fn(&App) -> Vec<CommandPaletteExtraCommand> + 'static,
+    ) {
+        cx.default_global::<Self>()
+            .0
+            .insert(provider_name, Rc::new(provider));
+    }
+
+    /// Returns the commands of every registered provider.
+    pub fn commands(cx: &App) -> Vec<CommandPaletteExtraCommand> {
+        let Some(this) = cx.try_global::<Self>() else {
+            return Vec::new();
+        };
+        this.0.values().flat_map(|provider| provider(cx)).collect()
+    }
+}

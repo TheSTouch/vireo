@@ -5,6 +5,7 @@ members = [
     "crates/acp_tools",
     "crates/action_log",
     "crates/activity_indicator",
+    "crates/addon_ui",
     "crates/agent",
     "crates/agent_servers",
     "crates/agent_settings",
@@ -293,6 +294,7 @@ acp_thread = { path = "crates/acp_thread" }
 acp_tools = { path = "crates/acp_tools" }
 action_log = { path = "crates/action_log" }
 activity_indicator = { path = "crates/activity_indicator" }
+addon_ui = { path = "crates/addon_ui" }
 agent = { path = "crates/agent" }
 agent_servers = { path = "crates/agent_servers" }
 agent_settings = { path = "crates/agent_settings" }

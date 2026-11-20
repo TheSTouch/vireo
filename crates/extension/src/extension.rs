@@ -1,3 +1,4 @@
+mod addon;
 mod capabilities;
 pub mod extension_builder;
 mod extension_events;
@@ -18,6 +19,7 @@ use semver::Version;
 use task::{SpawnInTerminal, ZedDebugConfig};
 use util::{paths::normalize_path, rel_path::RelPath};
 
+pub use crate::addon::*;
 pub use crate::capabilities::*;
 pub use crate::extension_events::*;
 pub use crate::extension_host_proxy::*;
@@ -188,6 +190,12 @@ pub trait Extension: Send + Sync + 'static {
         locator_name: String,
         config: SpawnInTerminal,
     ) -> Result<DebugRequest>;
+
+    /// Runs one of the addon's `[commands.<id>]` (WIT v0.9.0 and later).
+    async fn run_addon_command(&self, command_id: Arc<str>, args: Vec<String>) -> Result<()> {
+        let _ = args;
+        bail!("extension cannot run addon command `{command_id}`: it predates the addon API")
+    }
 }
 
 pub fn parse_wasm_extension_version(extension_id: &str, wasm_bytes: &[u8]) -> Result<Version> {

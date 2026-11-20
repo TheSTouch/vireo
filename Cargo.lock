@@ -202,6 +202,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "addon_ui"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "collections",
+ "command_palette_hooks",
+ "extension",
+ "gpui",
+ "language",
+ "log",
+ "lsp",
+ "parking_lot",
+ "project",
+ "schemars 1.0.4",
+ "serde",
+ "serde_json",
+ "task",
+ "theme",
+ "theme_settings",
+ "toml 0.9.8",
+ "workspace",
+]
+
+[[package]]
 name = "addr2line"
 version = "0.25.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -22587,6 +22612,7 @@ dependencies = [
  "acp_tools",
  "action_log",
  "activity_indicator",
+ "addon_ui",
  "agent",
  "agent-client-protocol",
  "agent_servers",

@@ -235,6 +235,24 @@ impl ExtensionImports for WasmState {
 
 impl ui::Host for WasmState {}
 
+impl super::Extension {
+    pub async fn call_run_command(
+        &self,
+        store: &mut wasmtime::Store<WasmState>,
+        command_id: &str,
+        args: &[String],
+    ) -> wasmtime::Result<Result<(), String>> {
+        match self {
+            super::Extension::V0_9_0(extension) => {
+                extension.call_run_command(store, command_id, args).await
+            }
+            _ => Ok(Err(
+                "addon commands require extension API v0.9.0 or later".to_string()
+            )),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::{Extension as VersionedExtension, is_supported_wasm_api_version};
