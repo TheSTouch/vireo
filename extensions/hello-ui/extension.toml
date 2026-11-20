@@ -1,0 +1,48 @@
+id = "hello-ui"
+name = "Hello UI"
+description = "A sample Vireo addon that exercises every addon UI API."
+version = "0.1.0"
+schema_version = 1
+authors = ["Vireo contributors"]
+repository = "https://github.com/TheSTouch/vireo"
+
+[commands.say-hello]
+title = "Say Hello"
+description = "Shows a notification and counts how often it ran."
+
+[commands.pick-greeting]
+title = "Pick a Greeting"
+
+[commands.open-dashboard]
+title = "Open Dashboard"
+
+[commands.decorate-active-file]
+title = "Decorate Active File"
+
+[commands.clear-decorations]
+title = "Clear Decorations"
+
+[commands.open-item]
+title = "Open"
+
+[commands.show-item-path]
+title = "Show Path"
+
+[panels.files]
+title = "Hello Files"
+icon = "folder"
+dock = "left"
+view = "tree"
+
+[[panels.files.context_menu]]
+command = "open-item"
+when = "file"
+
+[[panels.files.context_menu]]
+command = "show-item-path"
+
+[panels.dashboard]
+title = "Hello Dashboard"
+icon = "sparkle"
+dock = "right"
+view = "custom"

@@ -756,6 +756,7 @@ mod tests {
         AddonQuickPickItem, AddonStatusItem, ExtensionAddonProxy, ExtensionHostProxy,
         ExtensionManifest,
     };
+    use extension::{AddonElementKind, AddonTreeItem, AddonViewEvent, AddonViewTree};
     use fs::FakeFs;
     use futures::future::BoxFuture;
     use gpui::{App, TestAppContext};
@@ -930,7 +931,11 @@ mod tests {
         WasmState {
             manifest: manifest.clone(),
             table: ResourceTable::new(),
-            ctx: WasiCtxBuilder::new().build(),
+            // Guests read their working directory from PWD, as the real host sets it.
+            ctx: WasiCtxBuilder::new()
+                .inherit_stderr()
+                .env("PWD", "/work")
+                .build(),
             host: host.clone(),
             capability_granter: CapabilityGranter::new(Vec::new(), manifest.clone()),
             language_server_status_source: None,
@@ -1330,5 +1335,185 @@ mod tests {
                 "open-file /project/a.txt",
             ]
         );
+    }
+
+    /// Builds the hello-ui sample addon with the extension builder (as the
+    /// extension CLI does) and drives every addon API through it.
+    #[gpui::test]
+    async fn test_hello_ui_addon(cx: &mut TestAppContext) {
+        use extension::extension_builder::{CompileExtensionOptions, ExtensionBuilder};
+
+        cx.executor().allow_parking();
+        let root_dir =
+            util::dev_repo_root().expect("the sample is built from a repository checkout");
+        let source_dir = root_dir.join("extensions").join("hello-ui");
+        let real_fs: Arc<dyn fs::Fs> = fs::RealFs::new(None, cx.executor());
+        let mut manifest = ExtensionManifest::load(real_fs.clone(), &source_dir)
+            .await
+            .expect("the manifest loads");
+        assert_eq!(manifest.addon.commands.len(), 7);
+        assert_eq!(manifest.addon.panels.len(), 2);
+        ExtensionBuilder::new(FakeHttpClient::with_404_response(), root_dir.join("target"))
+            .compile_extension(
+                &source_dir,
+                &mut manifest,
+                CompileExtensionOptions::dev(),
+                real_fs,
+            )
+            .await
+            .expect("hello-ui builds");
+        let wasm = std::fs::read(source_dir.join("extension.wasm"))
+            .expect("the build wrote extension.wasm");
+        let version = extension::parse_wasm_extension_version("hello-ui", &wasm)
+            .expect("the version is embedded");
+        assert_eq!(version, Version::new(0, 9, 0));
+
+        let proxy = Arc::new(ExtensionHostProxy::new());
+        let recorder = RecordingAddonProxy::default();
+        proxy.register_addon_proxy(recorder.clone());
+        let host = test_host(cx, proxy);
+        host.fs
+            .as_fake()
+            .insert_tree(
+                "/project",
+                serde_json::json!({ "README.md": "", "src": { "lib.rs": "" } }),
+            )
+            .await;
+        let manifest = Arc::new(manifest);
+        let mut store = wasmtime::Store::new(&host.engine, test_state(&host, &manifest));
+        store.set_epoch_deadline(1);
+        store.epoch_deadline_async_yield_and_update(1);
+        let component =
+            Component::from_binary(&host.engine, &wasm).expect("the component compiles");
+        let executor = cx.background_executor.clone();
+        let extension = VersionedExtension::instantiate_async(
+            &executor,
+            &mut store,
+            ReleaseChannel::Dev,
+            version,
+            &component,
+        )
+        .await
+        .expect("hello-ui loads");
+        extension
+            .call_init_extension(&mut store)
+            .await
+            .expect("hello-ui initializes");
+        let take_calls = || std::mem::take(&mut *recorder.calls.lock());
+        assert_eq!(
+            take_calls(),
+            [
+                "watch hello-ui /project",
+                r#"set hello-ui/hello "Hello UI: 0" Some("Say hello") Some("say-hello")"#,
+            ]
+        );
+
+        // A command uses storage, a notification, the status bar and a view refresh.
+        extension
+            .call_run_command(&mut store, "say-hello", &[])
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            take_calls(),
+            [
+                "notify hello-ui Info Hello, world! (said 1 times)",
+                r#"set hello-ui/hello "Hello UI: 1" Some("Say hello") Some("say-hello")"#,
+                "refresh hello-ui/dashboard",
+            ]
+        );
+        assert_eq!(
+            recorder
+                .storage
+                .lock()
+                .get(&("hello-ui".into(), "hello-count".to_string()))
+                .map(String::as_str),
+            Some("1")
+        );
+
+        // The tree view lists the workspace folders, then their entries.
+        let labels = |items: Vec<AddonTreeItem>| {
+            items
+                .into_iter()
+                .map(|item| format!("{} {}", item.id, item.collapsible))
+                .collect::<Vec<_>>()
+        };
+        let roots = extension
+            .call_tree_children(&mut store, "files", None)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(labels(roots), ["/project true"]);
+        let children = extension
+            .call_tree_children(&mut store, "files", Some("/project"))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            labels(children),
+            ["/project/README.md false", "/project/src true"]
+        );
+
+        // The custom view renders, and events change what it renders.
+        let greeting = |tree: AddonViewTree| {
+            tree.elements
+                .into_iter()
+                .find_map(|element| match element.kind {
+                    AddonElementKind::Label(text) if element.id == "greeting" => Some(text),
+                    _ => None,
+                })
+        };
+        let tree = extension
+            .call_render_view(&mut store, "dashboard")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(tree.elements[0].id, "root");
+        assert_eq!(greeting(tree).as_deref(), Some("Hello, world!"));
+        extension
+            .call_handle_view_event(
+                &mut store,
+                "dashboard",
+                "shout",
+                AddonViewEvent::Toggle(true),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        let tree = extension
+            .call_render_view(&mut store, "dashboard")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(greeting(tree).as_deref(), Some("HELLO, WORLD!"));
+
+        // Quick pick and input box answers reach the addon (the recorder picks
+        // the last item and keeps the input box's value).
+        extension
+            .call_run_command(&mut store, "pick-greeting", &[])
+            .await
+            .unwrap()
+            .unwrap();
+        let tree = extension
+            .call_render_view(&mut store, "dashboard")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(greeting(tree).as_deref(), Some("HALLO, WORLD!"));
+
+        // Without an active editor, decorating fails with the addon's message.
+        let decorated = extension
+            .call_run_command(&mut store, "decorate-active-file", &[])
+            .await
+            .unwrap();
+        assert_eq!(decorated, Err("no active editor".to_string()));
+
+        // Changes to the watched folder reach the addon.
+        take_calls();
+        extension
+            .call_files_changed(&mut store, 7, &["/project/new.rs".to_string()])
+            .await
+            .unwrap();
+        assert_eq!(take_calls(), ["refresh hello-ui/dashboard"]);
     }
 }

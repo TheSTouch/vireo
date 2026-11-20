@@ -266,6 +266,7 @@ members = [
     #
 
     "extensions/glsl",
+    "extensions/hello-ui",
     "extensions/html",
     "extensions/proto",
     "extensions/test-extension",
