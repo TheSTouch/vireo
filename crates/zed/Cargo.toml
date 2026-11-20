@@ -67,6 +67,7 @@ required-features = ["visual-tests"]
 acp_thread.workspace = true
 acp_tools.workspace = true
 action_log = { workspace = true, optional = true }
+activity_bar.workspace = true
 activity_indicator.workspace = true
 addon_ui.workspace = true
 agent-client-protocol.workspace = true
