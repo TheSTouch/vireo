@@ -7,11 +7,12 @@ pub mod process;
 pub mod protocol;
 pub mod session;
 pub mod sessions;
+pub mod sessions_ui;
 pub mod settings;
 pub mod view;
 
 use ::settings::Settings as _;
-use gpui::{App, Context, Window, actions};
+use gpui::{App, AppContext as _, Context, Entity, Window, actions};
 use workspace::Workspace;
 
 pub use crate::panel::{ClaudeCodePanel, ClaudeCodeTab};
@@ -106,8 +107,20 @@ pub fn init(cx: &mut App) {
     cx.set_global(claude_ide::GlobalDiffReviewProvider(std::rc::Rc::new(
         diff_review::PanelDiffProvider,
     )));
-    cx.observe_new(|workspace: &mut Workspace, _, _| register_workspace_actions(workspace))
+    sessions::load_store(cx);
+    cx.observe_new(|workspace: &mut Workspace, _, cx| {
+        register_workspace_actions(workspace);
+        cx.subscribe(&cx.entity(), |_, _, event: &workspace::Event, cx| {
+            if let workspace::Event::ItemRemoved { item_id } = event {
+                let item_id = *item_id;
+                // The tab records itself as closing while it is removed;
+                // look once that has happened.
+                cx.defer(move |cx| sessions::note_item_removed(item_id, cx));
+            }
+        })
         .detach();
+    })
+    .detach();
 }
 
 fn register_workspace_actions(workspace: &mut Workspace) {
@@ -135,6 +148,11 @@ fn register_workspace_actions(workspace: &mut Workspace) {
                 panel.update(cx, |panel, cx| panel.new_conversation(window, cx));
             }
         })
+        .register_action(show_sessions)
+        .register_action(reopen_closed_session)
+        .register_action(rename_session)
+        .register_action(mark_session_unread)
+        .register_action(add_session_to_group)
         .register_action(focus_input)
         .register_action(insert_at_mention)
         .register_action(insert_at_mentioned);
@@ -157,6 +175,179 @@ fn focus_input(
         return;
     }
     open_preferred(workspace, window, cx);
+}
+
+fn open_session_ids(workspace: &Workspace, cx: &App) -> Vec<String> {
+    let mut ids: Vec<String> = workspace
+        .items_of_type::<ClaudeCodeTab>(cx)
+        .filter_map(|tab| {
+            tab.read(cx)
+                .view
+                .read(cx)
+                .session
+                .read(cx)
+                .session_id()
+                .map(str::to_string)
+        })
+        .collect();
+    if let Some(panel) = workspace.panel::<ClaudeCodePanel>(cx)
+        && let Some(id) = panel.read(cx).view.read(cx).session.read(cx).session_id()
+    {
+        ids.push(id.to_string());
+    }
+    ids
+}
+
+fn show_sessions(
+    workspace: &mut Workspace,
+    _: &ShowSessions,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let cwd = panel::workspace_cwd(workspace.project(), cx);
+    let dir = sessions::transcripts_dir(&claude_ide::claude_config_dir(), &cwd);
+    let store = sessions::read_store(cx);
+    let days = ClaudeCodeSettings::get_global(cx).archive_inactive_sessions;
+    let open_ids = open_session_ids(workspace, cx);
+    let in_tab = workspace.active_item_as::<ClaudeCodeTab>(cx).is_some();
+    let listing = cx.background_spawn(async move { sessions::list_sessions(&dir, &store) });
+    cx.spawn_in(window, async move |workspace, cx| {
+        let mut sessions = listing.await;
+        let to_archive =
+            sessions::sessions_to_archive(&sessions, days, &open_ids, chrono::Utc::now());
+        workspace
+            .update_in(cx, |workspace, window, cx| {
+                if !to_archive.is_empty() {
+                    sessions::update_store(cx, |store| {
+                        for session_id in &to_archive {
+                            store.meta_mut(session_id).archived = true;
+                        }
+                    });
+                    for session in &mut sessions {
+                        if to_archive.contains(&session.session_id) {
+                            session.meta.archived = true;
+                        }
+                    }
+                }
+                let weak_workspace = cx.entity().downgrade();
+                let on_open: sessions_ui::OnOpen =
+                    std::sync::Arc::new(move |workspace, session_id, window, cx| {
+                        let location = if in_tab {
+                            Location::NewTab
+                        } else {
+                            Location::Panel
+                        };
+                        open(workspace, location, Some(session_id), window, cx);
+                    });
+                workspace.toggle_modal(window, cx, |window, cx| {
+                    let delegate =
+                        sessions_ui::SessionsDelegate::new(weak_workspace, sessions, on_open);
+                    picker::Picker::uniform_list(delegate, window, cx)
+                });
+            })
+            .ok();
+    })
+    .detach();
+}
+
+fn reopen_closed_session(
+    workspace: &mut Workspace,
+    _: &ReopenClosedSession,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if ClaudeCodeSettings::get_global(cx).enable_reopen_closed_session_shortcut
+        && sessions::last_closed_was_session(cx)
+        && let Some(session_id) = sessions::take_last_closed(cx)
+    {
+        open(workspace, Location::NewTab, Some(session_id), window, cx);
+        return;
+    }
+    window.dispatch_action(Box::new(workspace::pane::ReopenClosedItem), cx);
+}
+
+fn active_session_id(
+    workspace: &Workspace,
+    cx: &App,
+) -> Option<(Entity<view::ClaudeCodeView>, String)> {
+    let view = active_view(workspace, cx)?;
+    let session_id = view.read(cx).session.read(cx).session_id()?.to_string();
+    Some((view, session_id))
+}
+
+fn rename_session(
+    workspace: &mut Workspace,
+    _: &RenameSession,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some((view, session_id)) = active_session_id(workspace, cx) else {
+        return;
+    };
+    let current = view.read(cx).title(cx).to_string();
+    workspace.toggle_modal(window, cx, |window, cx| {
+        sessions_ui::TextPrompt::new(
+            "Rename session",
+            &current,
+            move |title, cx| {
+                let title = (!title.is_empty()).then_some(title);
+                sessions::update_store(cx, |store| {
+                    store.meta_mut(&session_id).title = title.clone()
+                });
+                view.update(cx, |_, cx| cx.emit(view::ViewEvent::TitleChanged));
+            },
+            window,
+            cx,
+        )
+    });
+}
+
+fn mark_session_unread(
+    workspace: &mut Workspace,
+    _: &MarkSessionUnread,
+    _: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some((_, session_id)) = active_session_id(workspace, cx) else {
+        return;
+    };
+    sessions::update_store(cx, |store| store.meta_mut(&session_id).unread = true);
+    if let Some(tab) = workspace.active_item_as::<ClaudeCodeTab>(cx) {
+        tab.update(cx, |tab, cx| {
+            tab.unread = true;
+            cx.emit(panel::TabEvent::UpdateTab);
+        });
+    }
+}
+
+fn add_session_to_group(
+    workspace: &mut Workspace,
+    _: &AddSessionToGroup,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let Some((_, session_id)) = active_session_id(workspace, cx) else {
+        return;
+    };
+    let current = sessions::read_store(cx)
+        .sessions
+        .get(&session_id)
+        .and_then(|meta| meta.group.clone())
+        .unwrap_or_default();
+    workspace.toggle_modal(window, cx, |window, cx| {
+        sessions_ui::TextPrompt::new(
+            "Add session to group (empty removes it from its group)",
+            &current,
+            move |group, cx| {
+                let group = (!group.is_empty()).then_some(group);
+                sessions::update_store(cx, |store| {
+                    store.meta_mut(&session_id).group = group.clone()
+                });
+            },
+            window,
+            cx,
+        )
+    });
 }
 
 fn editor_selection(workspace: &Workspace, cx: &App) -> Option<claude_ide::SelectionInfo> {

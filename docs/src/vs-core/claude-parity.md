@@ -28,7 +28,7 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.window.open` | Open in New Window | Opens Claude alone in a new window. | `claude_code::OpenInNewWindow` | B-4 | Done |
 | `claude-vscode.sidebar.open` | Open in Side Bar | Opens Claude in the secondary side bar. | `claude_code::OpenInSideBar` (right dock) | B-4 | Done |
 | `claude-vscode.newConversation` | New Conversation | Starts a new conversation in the focused Claude view. | `claude_code::NewConversation` | B-4 | Done |
-| `claude-vscode.reopenClosedSession` | Reopen Closed Session | Reopens the most recently closed session tab. | `claude_code::ReopenClosedSession` | B-6 | Todo |
+| `claude-vscode.reopenClosedSession` | Reopen Closed Session | Reopens the most recently closed session tab. | `claude_code::ReopenClosedSession` | B-6 | Done: reopens the last closed Claude tab when that was the last thing closed, otherwise falls through to reopening the last closed item |
 | `claude-vscode.update` | Update extension | Updates the extension. | — | — | N/A: Vireo ships the panel in the app; it updates with Vireo. |
 | `claude-vscode.focus` | Focus input | Moves focus to the message box. | `claude_code::FocusInput` | B-4 | Done |
 | `claude-vscode.focusLastMessage` | Focus last message | Moves focus to the last message, for screen readers. | `claude_code::FocusLastMessage` | B-4 | Done |
@@ -50,9 +50,9 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.showLogs` | Show Logs | Opens the extension's log channel. | `claude_code::ShowLogs` | B-8 | Todo |
 | `claude-vscode.toggleFocusView` | Toggle Focus view | Hides tool calls and activity, showing only prompts and replies. | `claude_code::ToggleFocusView` | B-4 | Done |
 | `claude-vscode.openWalkthrough` | Open Walkthrough | Opens the "Get started" walkthrough. | `claude_code::OpenWalkthrough` | B-8 | Todo |
-| `claude-vscode.markSessionUnread` | Mark Session as Unread | Marks the session tab unread. | `claude_code::MarkSessionUnread` | B-6 | Todo |
-| `claude-vscode.renameSessionTab` | Rename Session Tab | Renames the session. | `claude_code::RenameSession` | B-6 | Todo |
-| `claude-vscode.addSessionTabToGroup` | Add Session Tab to Group | Puts the session in a named group of the sessions list. | `claude_code::AddSessionToGroup` | B-6 | Todo |
+| `claude-vscode.markSessionUnread` | Mark Session as Unread | Marks the session tab unread. | `claude_code::MarkSessionUnread` | B-6 | Done |
+| `claude-vscode.renameSessionTab` | Rename Session Tab | Renames the session. | `claude_code::RenameSession` | B-6 | Done |
+| `claude-vscode.addSessionTabToGroup` | Add Session Tab to Group | Puts the session in a named group of the sessions list. | `claude_code::AddSessionToGroup` | B-6 | Done |
 
 The extension also binds `claude-vscode.terminal.open.keyboard`, an internal variant of "Open in
 Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the voice dictation key
@@ -100,12 +100,12 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | `hideOnboarding` | bool, `false` | Hide the onboarding checklist. | `hide_onboarding` | B-8 | Todo |
 | `attachOpenFile` | bool, `true` | Attach the open file to messages and show it as a chip. | `attach_open_file` | B-4 | Done |
 | `attachSelection` | bool, `true` | Attach the editor selection to messages and show it as a chip. | `attach_selection` | B-4 | Done |
-| `continueAfterReload` | bool, `true` | After a reload, a restored session continues the interrupted step. | `continue_after_reload` | B-6 | Todo |
+| `continueAfterReload` | bool, `true` | After a reload, a restored session continues the interrupted step. | `continue_after_reload` | B-6 | Done: the panel's session; a session that was in plan mode is restored without continuing |
 | `scrollToBottomOnSend` | bool, `true` | Scroll to the bottom on send. | `scroll_to_bottom_on_send` | B-4 | Done |
 | `showMessageTimestamps` | bool, `true` | Show message times and a date line when the day changes. | `show_message_timestamps` | B-4 | Done |
 | `promptSuggestions` | bool, `true` | Show a suggested next prompt in the empty message box. | `prompt_suggestions` | B-4 | Done |
 | `spinnerVerbs` | `{mode: append or replace, verbs: []}` | Verbs shown while Claude works. | `spinner_verbs` | B-4 | Done |
-| `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Todo |
+| `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Done: applied when the sessions list opens; open sessions are never archived |
 | `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Done |
 
 ## Menus and places
@@ -116,7 +116,7 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | Editor context menu | Accept / Reject change at cursor, in the proposed diff. | Same entries in the diff editor's context menu. | B-5 | Done |
 | Comment bar on each hunk | "Accept this change" / "Reject this change". | Per-hunk accept / reject buttons. | B-5 | Done |
 | Explorer context menu | "Claude Code: Add to Chat" on files and folders, not on roots. | Project panel context menu entry. | B-8 | Todo |
-| Session tab context menu | Mark Session as Unread, Rename Session Tab, Add Session Tab to Group. | Tab context menu and sessions list menu. | B-6 | Todo |
+| Session tab context menu | Mark Session as Unread, Rename Session Tab, Add Session Tab to Group. | Tab context menu and sessions list menu. | B-6 | Done: the three entries in the Claude tab's context menu; they act on the active Claude tab |
 | Activity bar / secondary side bar | Claude Code view container; a separate sessions-list view when enabled. | Right dock panel with its own sessions list. | B-4, B-6 | Done |
 | Status bar | "✻ Claude Code" item that opens Claude. | Dock button with Claude's icon. | B-4 | Done |
 | Walkthrough "Get started with Claude Code" | Steps: welcome, open Claude Code, chat with Claude, past conversations. | Onboarding checklist in the empty panel. | B-8 | Todo |
@@ -153,13 +153,20 @@ Observed in the running extension, version 2.1.328.
 | Queued messages | A message sent while Claude works is queued ("Message queued."). | B-4 | Done |
 | Stop | Stop button and Escape interrupt the turn. | B-4 | Done |
 | Focus view | Hides tool calls and thinking; a live indicator names the running tool. | B-4 | Done |
-| Rewind and fork | Hover a user message: "Fork conversation from here", "Rewind code to here", "Fork conversation and rewind code". | B-6 | Todo |
+| Rewind and fork | Hover a user message: "Fork conversation from here", "Rewind code to here", "Fork conversation and rewind code". | B-6 | Done: hover buttons on each prompt; a fork opens in a new tab with `--resume --fork-session --resume-session-at` and the prompt back in the input; rewinding uses the `rewind_files` control request |
 | Copy and bookmark | "Copy response" and "Bookmark response" under each reply; a bookmarks list in the header. | B-4 | Todo |
-| Sessions list | History button: search ("Search sessions…"), groups, archived sessions, rename, archive, mark unread. | B-6 | Todo |
-| Session tabs | Several sessions open as editor tabs; unread dot; a closed tab can be reopened. | B-6 | Todo |
+| Sessions list | History button: search ("Search sessions…"), groups, archived sessions, rename, archive, mark unread. | B-6 | Done: `claude_code::ShowSessions` lists this folder's transcripts by last activity, with search, groups, an `archived:` filter and an archive button; rename, group and unread go through the commands above |
+| Session tabs | Several sessions open as editor tabs; unread dot; a closed tab can be reopened. | B-6 | Done |
 | Onboarding | Empty state: "Welcome to Claude Code", a short checklist, and the login choices (claude.ai account, Anthropic Console, third-party providers). | B-8 | Todo |
 | Login | Uses the CLI's login. "Sign in again", "Log in with a different account". | B-8 | Todo |
 | Voice input | Mic button in the input; dictation through the native audio-capture module, signed in to claude.ai. | B-8 | Todo |
+
+**Where sessions live (B-6).** The conversations themselves are the CLI's transcripts,
+`~/.claude/projects/<folder>/<session>.jsonl` (`CLAUDE_CONFIG_DIR` is honoured), so sessions
+started in a terminal show up too. What only Vireo knows (custom titles, groups, unread, archived,
+and which session the panel had open, for `continue_after_reload`) is kept in
+`<Vireo data dir>/claude_code/sessions.json`. Resuming a session replays its transcript into the
+view and starts `claude --resume=<id>`.
 
 ## The `claude` process
 

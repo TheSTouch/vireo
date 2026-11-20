@@ -21,6 +21,9 @@ pub struct LaunchOptions {
     pub cwd: PathBuf,
     pub resume: Option<String>,
     pub fork_session: bool,
+    /// Resume the session only up to this message (`--resume-session-at`),
+    /// to fork a conversation from an earlier prompt.
+    pub resume_session_at: Option<String>,
     pub permission_mode: Option<PermissionMode>,
     pub model: Option<String>,
     pub max_thinking_tokens: Option<u32>,
@@ -120,6 +123,9 @@ pub fn build_command_line(
         args.push(format!("--resume={resume}"));
         if options.fork_session {
             args.push("--fork-session".to_string());
+        }
+        if let Some(message_id) = &options.resume_session_at {
+            args.push(format!("--resume-session-at={message_id}"));
         }
     }
     args.push("--setting-sources=user,project,local".to_string());
@@ -401,6 +407,21 @@ mod tests {
         );
         assert_eq!(line.env["CLAUDE_CODE_SSE_PORT"], "4242");
         assert_eq!(line.env["ENABLE_IDE_INTEGRATION"], "true");
+
+        let options = LaunchOptions {
+            resume: Some("abc".into()),
+            fork_session: true,
+            resume_session_at: Some("a1".into()),
+            ..LaunchOptions::default()
+        };
+        let line = build_command_line(Path::new("/bin/claude"), &options, None);
+        let at = line
+            .args
+            .iter()
+            .position(|arg| arg == "--resume=abc")
+            .unwrap();
+        assert_eq!(line.args[at + 1], "--fork-session");
+        assert_eq!(line.args[at + 2], "--resume-session-at=a1");
 
         let options = LaunchOptions {
             sdk_mcp_server: Some("vireo".into()),

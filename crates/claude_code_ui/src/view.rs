@@ -24,7 +24,7 @@ use workspace::Workspace;
 use crate::conversation::{
     Entry, NoticeKind, PermissionRequest, PermissionStatus, ToolCall, ToolStatus, TurnState,
 };
-use crate::protocol::{PermissionDecision, PermissionMode};
+use crate::protocol::{OutgoingControlRequest, PermissionDecision, PermissionMode};
 use crate::session::{ClaudeSession, ProcessStatus, PromptImage, SessionEvent};
 use crate::settings::{ClaudeCodeSettings, spinner_verbs};
 use crate::{
@@ -192,8 +192,86 @@ impl ClaudeCodeView {
         this
     }
 
+    pub fn set_input_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.input
+            .update(cx, |input, cx| input.set_text(text, window, cx));
+    }
+
+    /// "Fork conversation from here" on a prompt: a new tab with the session
+    /// up to just before it and the prompt in the input. With `rewind`, the
+    /// files are first put back as they were before that prompt.
+    fn fork_from(
+        &mut self,
+        index: usize,
+        rewind: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let session = self.session.read(cx);
+        let Some(Entry::User(user)) = session.conversation.entries.get(index) else {
+            return;
+        };
+        let Some(session_id) = session.session_id().map(str::to_string) else {
+            return;
+        };
+        let prompt = strip_context_preamble(&user.text).to_string();
+        let resume_at = user.previous_uuid.clone();
+        let user_message_id = user.uuid.clone();
+        let entries: Vec<Entry> = session.conversation.entries[..index]
+            .iter()
+            .filter(|entry| {
+                !matches!(entry, Entry::Permission(request) if request.status == PermissionStatus::Pending)
+            })
+            .cloned()
+            .collect();
+        if rewind && let Some(user_message_id) = user_message_id {
+            self.rewind_code_to(user_message_id, cx);
+        }
+        let Some(workspace) = self.workspace.upgrade() else {
+            return;
+        };
+        workspace.update(cx, |workspace, cx| {
+            crate::panel::open_fork(
+                workspace, session_id, resume_at, entries, prompt, window, cx,
+            );
+        });
+    }
+
+    /// "Rewind code to here": undoes the file changes Claude made since this
+    /// prompt, using the CLI's file checkpoints.
+    fn rewind_code_to(&mut self, user_message_id: String, cx: &mut Context<Self>) {
+        let task = self.session.update(cx, |session, cx| {
+            session.request(OutgoingControlRequest::RewindFiles { user_message_id }, cx)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            this.update(cx, |this, cx| {
+                let (kind, text) = match result {
+                    Ok(response) => describe_rewind(&response),
+                    Err(error) => (
+                        NoticeKind::Error,
+                        format!("Could not rewind the code: {error:#}"),
+                    ),
+                };
+                this.session.update(cx, |session, _| {
+                    session.conversation.push_notice(kind, text, Utc::now())
+                });
+                cx.notify();
+            })
+            .ok();
+        })
+        .detach();
+    }
+
     pub fn title(&self, cx: &App) -> SharedString {
         let conversation = &self.session.read(cx).conversation;
+        if let Some(title) = conversation
+            .session_id
+            .as_deref()
+            .and_then(|session_id| crate::sessions::custom_title(session_id, cx))
+        {
+            return title.into();
+        }
         if let Some(title) = &conversation.title {
             return title.clone().into();
         }
@@ -870,8 +948,47 @@ impl ClaudeCodeView {
     ) -> AnyElement {
         let colors = cx.theme().colors();
         let text = strip_context_preamble(&user.text);
+        let group: SharedString = format!("claude-user-{index}").into();
+        let actions = user
+            .uuid
+            .clone()
+            .filter(|_| !self.is_running(cx))
+            .map(|user_message_id| {
+                h_flex()
+                    .justify_end()
+                    .gap_0p5()
+                    .visible_on_hover(group.clone())
+                    .child(
+                        IconButton::new(("fork", index), IconName::GitBranch)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Fork conversation from here"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.fork_from(index, false, window, cx)
+                            })),
+                    )
+                    .child(
+                        IconButton::new(("rewind", index), IconName::RotateCcw)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Rewind code to here"))
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.rewind_code_to(user_message_id.clone(), cx)
+                            })),
+                    )
+                    .child(
+                        IconButton::new(("fork-rewind", index), IconName::GitBranchPlus)
+                            .icon_size(IconSize::XSmall)
+                            .icon_color(Color::Muted)
+                            .tooltip(Tooltip::text("Fork conversation and rewind code"))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.fork_from(index, true, window, cx)
+                            })),
+                    )
+            });
         v_flex()
             .id(("user", index))
+            .group(group)
             .w_full()
             .gap_0p5()
             .when_some(timestamp, |this, timestamp| {
@@ -921,6 +1038,7 @@ impl ClaudeCodeView {
                         )
                     }),
             )
+            .children(actions)
             .into_any_element()
     }
 
@@ -1971,6 +2089,46 @@ pub fn tool_input_text(call: &ToolCall) -> String {
     }
 }
 
+/// The notice shown after "Rewind code to here", from the CLI's answer
+/// (`canRewind`, `error`, `filesChanged`, `insertions`, `deletions`).
+fn describe_rewind(response: &serde_json::Value) -> (NoticeKind, String) {
+    if response
+        .get("canRewind")
+        .and_then(serde_json::Value::as_bool)
+        == Some(false)
+    {
+        let reason = response
+            .get("error")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("no checkpoint for that message");
+        return (
+            NoticeKind::Error,
+            format!("Could not rewind the code: {reason}"),
+        );
+    }
+    let files = response
+        .get("filesChanged")
+        .and_then(serde_json::Value::as_array)
+        .map_or(0, Vec::len);
+    let count = |key: &str| {
+        response
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
+    let text = if files == 0 {
+        "Rewound the code: no files needed changing.".to_string()
+    } else {
+        format!(
+            "Rewound the code: {files} file{} restored (+{} −{}).",
+            if files == 1 { "" } else { "s" },
+            count("insertions"),
+            count("deletions")
+        )
+    };
+    (NoticeKind::Info, text)
+}
+
 pub fn truncate(text: &str, max_chars: usize) -> String {
     if text.chars().count() <= max_chars {
         return text.to_string();
@@ -2091,6 +2249,30 @@ mod tests {
         assert_eq!(truncate_lines("a\nb\nc", 2), "a\nb\n… 1 more lines");
         assert_eq!(format_duration(59 * 60 + 5), "59m");
         assert_eq!(format_duration(3 * 3600 + 120), "3h 2m");
+    }
+
+    #[test]
+    fn rewind_notices() {
+        assert_eq!(
+            describe_rewind(
+                &serde_json::json!({"canRewind": true, "filesChanged": ["/a", "/b"], "insertions": 3, "deletions": 1})
+            ),
+            (
+                NoticeKind::Info,
+                "Rewound the code: 2 files restored (+3 −1).".to_string()
+            )
+        );
+        assert_eq!(
+            describe_rewind(&serde_json::json!({"canRewind": false, "error": "No checkpoint"})),
+            (
+                NoticeKind::Error,
+                "Could not rewind the code: No checkpoint".to_string()
+            )
+        );
+        assert_eq!(
+            describe_rewind(&serde_json::json!({"canRewind": true})).0,
+            NoticeKind::Info
+        );
     }
 
     #[gpui::test]

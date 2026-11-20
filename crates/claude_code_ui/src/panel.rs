@@ -18,6 +18,7 @@ use crate::view::{ClaudeCodeView, ViewEvent};
 use crate::{NewConversation, ToggleFocus};
 
 const PANEL_KEY: &str = "ClaudeCodePanel";
+const CONTINUE_PROMPT: &str = "Continue from where you left off.";
 
 /// The directory Claude runs in: the first folder of the workspace.
 pub fn workspace_cwd(project: &Entity<Project>, cx: &App) -> PathBuf {
@@ -39,9 +40,25 @@ pub fn new_session(
 ) -> Entity<ClaudeSession> {
     let cwd = workspace_cwd(&project, cx);
     let ide = claude_ide::ClaudeIde::for_workspace(workspace, cx).map(|ide| ide.downgrade());
+    let transcript = resume.as_ref().map(|session_id| {
+        crate::sessions::transcripts_dir(&claude_ide::claude_config_dir(), &cwd)
+            .join(format!("{session_id}.jsonl"))
+    });
     cx.new(|cx| {
         let mut session = ClaudeSession::new(project.downgrade(), cwd, resume, cx);
         session.set_ide(ide);
+        if let Some(path) = transcript {
+            match crate::sessions::load_transcript(&path) {
+                Ok(mut conversation) => {
+                    conversation.permission_mode = session.conversation.permission_mode;
+                    if conversation.session_id.is_none() {
+                        conversation.session_id = session.conversation.session_id.clone();
+                    }
+                    session.conversation = conversation;
+                }
+                Err(error) => log::warn!("failed to load the Claude session: {error:#}"),
+            }
+        }
         session
     })
 }
@@ -64,6 +81,8 @@ pub struct ClaudeCodePanel {
     pub view: Entity<ClaudeCodeView>,
     focus_handle: FocusHandle,
     position: DockPosition,
+    cwd_key: String,
+    saved_state: Option<crate::sessions::OpenSession>,
     _view_subscription: Subscription,
 }
 
@@ -87,19 +106,73 @@ impl ClaudeCodePanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let view = new_view(&workspace, project, None, window, cx);
+        let cwd_key = workspace_cwd(&project, cx).to_string_lossy().into_owned();
+        // Bring back the session the panel had before Vireo restarted.
+        let saved = crate::sessions::read_store(cx)
+            .open
+            .get(&cwd_key)
+            .and_then(|open| open.iter().find(|session| !session.in_tab).cloned());
+        let view = new_view(
+            &workspace,
+            project,
+            saved.as_ref().map(|saved| saved.session_id.clone()),
+            window,
+            cx,
+        );
+        if let Some(saved) = &saved
+            && saved.interrupted
+            && !saved.plan_mode
+            && ClaudeCodeSettings::get_global(cx).continue_after_reload
+        {
+            let session = view.read(cx).session.clone();
+            session.update(cx, |session, cx| {
+                if let Err(error) = session.send_prompt(CONTINUE_PROMPT.to_string(), Vec::new(), cx)
+                {
+                    log::warn!("failed to continue the Claude session: {error:#}");
+                }
+            });
+        }
         let subscription = Self::subscribe_view(&view, cx);
         Self {
             workspace: workspace.downgrade(),
             view,
             focus_handle: cx.focus_handle(),
             position: DockPosition::Right,
+            cwd_key,
+            saved_state: saved,
             _view_subscription: subscription,
         }
     }
 
     fn subscribe_view(view: &Entity<ClaudeCodeView>, cx: &mut Context<Self>) -> Subscription {
-        cx.subscribe(view, |_, _, _: &ViewEvent, cx| cx.notify())
+        cx.subscribe(view, |this, _, _: &ViewEvent, cx| {
+            this.save_state(cx);
+            cx.notify();
+        })
+    }
+
+    /// Remembers the panel's session and whether a turn is running, for
+    /// continue_after_reload. Written only when that changes.
+    fn save_state(&mut self, cx: &mut Context<Self>) {
+        let session = self.view.read(cx).session.read(cx);
+        let Some(session_id) = session.session_id().map(str::to_string) else {
+            return;
+        };
+        let state = crate::sessions::OpenSession {
+            session_id,
+            interrupted: session.conversation.turn != crate::conversation::TurnState::Idle,
+            plan_mode: session.conversation.permission_mode
+                == Some(crate::protocol::PermissionMode::Plan),
+            in_tab: false,
+        };
+        if self.saved_state.as_ref() == Some(&state) {
+            return;
+        }
+        self.saved_state = Some(state.clone());
+        let cwd_key = self.cwd_key.clone();
+        crate::sessions::update_store(cx, |store| {
+            store.open.insert(cwd_key, vec![state]);
+        });
     }
 
     pub fn set_view(&mut self, view: Entity<ClaudeCodeView>, cx: &mut Context<Self>) {
@@ -283,6 +356,24 @@ impl Render for ClaudeCodeTab {
 impl Item for ClaudeCodeTab {
     type Event = TabEvent;
 
+    fn tab_extra_context_menu_actions(
+        &self,
+        _: &mut Window,
+        _: &mut Context<Self>,
+    ) -> Vec<(SharedString, Box<dyn gpui::Action>)> {
+        vec![
+            (
+                "Mark Session as Unread".into(),
+                Box::new(crate::MarkSessionUnread),
+            ),
+            ("Rename Session Tab".into(), Box::new(crate::RenameSession)),
+            (
+                "Add Session Tab to Group".into(),
+                Box::new(crate::AddSessionToGroup),
+            ),
+        ]
+    }
+
     fn tab_content_text(&self, _: usize, cx: &App) -> SharedString {
         self.custom_title
             .clone()
@@ -318,6 +409,7 @@ impl Item for ClaudeCodeTab {
     fn on_removed(&self, cx: &mut Context<Self>) {
         let session = self.view.read(cx).session.clone();
         crate::sessions::remember_closed(&session, cx);
+        crate::sessions::note_claude_tab_closed(cx.entity_id(), cx);
     }
 }
 
@@ -364,6 +456,47 @@ pub fn open(
             Some(view)
         }
     }
+}
+
+/// Opens a fork of a conversation in a new tab, the way the extension's
+/// "Fork conversation from here" does: the session resumed up to the message
+/// before the chosen prompt, under a new session id, with the prompt back in
+/// the input to edit. With no earlier message it is a new conversation.
+pub fn open_fork(
+    workspace: &mut Workspace,
+    session_id: String,
+    resume_at: Option<String>,
+    entries: Vec<crate::conversation::Entry>,
+    prompt: String,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Entity<ClaudeCodeView> {
+    let workspace_entity = cx.entity();
+    let project = workspace.project().clone();
+    let cwd = workspace_cwd(&project, cx);
+    let ide =
+        claude_ide::ClaudeIde::for_workspace(&workspace_entity, cx).map(|ide| ide.downgrade());
+    let session = cx.new(|cx| {
+        let resume = resume_at.as_ref().map(|_| session_id);
+        let forked = resume.is_some();
+        let mut session = ClaudeSession::new(project.downgrade(), cwd, resume, cx);
+        session.set_ide(ide);
+        if forked {
+            session.set_fork_on_start(true);
+            session.set_resume_session_at(resume_at);
+            // The fork gets its own id from the CLI; until then it has none.
+            session.conversation.session_id = None;
+            session.conversation.entries = entries;
+        }
+        session
+    });
+    let view = cx
+        .new(|cx| ClaudeCodeView::new(session, workspace_entity.downgrade(), project, window, cx));
+    view.update(cx, |view, cx| view.set_input_text(&prompt, window, cx));
+    let tab = cx.new(|cx| ClaudeCodeTab::new(workspace_entity.downgrade(), view.clone(), cx));
+    workspace.add_item_to_active_pane(Box::new(tab), None, true, window, cx);
+    window.focus(&view.read(cx).input_focus_handle(cx), cx);
+    view
 }
 
 /// The Claude view to act on in this window: the active Claude tab, or the

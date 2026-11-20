@@ -3070,6 +3070,7 @@ dependencies = [
  "language",
  "log",
  "markdown",
+ "menu",
  "paths",
  "picker",
  "project",

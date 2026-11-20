@@ -46,6 +46,9 @@ impl Entry {
 #[derive(Clone, Debug, PartialEq)]
 pub struct UserEntry {
     pub uuid: Option<String>,
+    /// The id of the message just before this prompt in the session: forking
+    /// "from here" resumes the session at that message.
+    pub previous_uuid: Option<String>,
     pub text: String,
     pub images: usize,
     pub timestamp: DateTime<Utc>,
@@ -210,6 +213,9 @@ pub struct Conversation {
     /// in order, and how many of them a final message has already replaced.
     streamed_entries: HashMap<String, (Vec<usize>, usize)>,
     tool_entries: HashMap<String, usize>,
+    /// The id of the last main-thread message, for the next prompt's
+    /// `previous_uuid`.
+    last_message_uuid: Option<String>,
 }
 
 impl Conversation {
@@ -218,6 +224,7 @@ impl Conversation {
         self.prompt_suggestion = None;
         self.entries.push(Entry::User(UserEntry {
             uuid: None,
+            previous_uuid: None,
             text,
             images,
             timestamp: now,
@@ -375,6 +382,11 @@ impl Conversation {
         }
     }
 
+    /// Ends the turn a restored transcript was in the middle of.
+    pub fn end_restored_turn(&mut self) {
+        self.finish_turn();
+    }
+
     fn finish_turn(&mut self) {
         self.turn = TurnState::Idle;
         self.turn_started_at = None;
@@ -500,6 +512,9 @@ impl Conversation {
     }
 
     fn apply_assistant(&mut self, assistant: AssistantMessage, now: DateTime<Utc>) {
+        if assistant.parent_tool_use_id.is_none() && assistant.uuid.is_some() {
+            self.last_message_uuid = assistant.uuid.clone();
+        }
         if assistant.message.model.is_some() && assistant.parent_tool_use_id.is_none() {
             self.model = assistant.message.model.clone();
         }
@@ -588,6 +603,10 @@ impl Conversation {
     }
 
     fn apply_user(&mut self, user: UserMessage, now: DateTime<Utc>) {
+        let previous_uuid = self.last_message_uuid.clone();
+        if user.parent_tool_use_id.is_none() && user.uuid.is_some() {
+            self.last_message_uuid = user.uuid.clone();
+        }
         let blocks = user.message.content.blocks();
         let mut has_tool_result = false;
         for block in &blocks {
@@ -639,6 +658,7 @@ impl Conversation {
         match pending {
             Some(entry) => {
                 entry.uuid = user.uuid;
+                entry.previous_uuid = previous_uuid;
             }
             None => {
                 if text.is_empty() && images == 0 {
@@ -646,6 +666,7 @@ impl Conversation {
                 }
                 self.entries.push(Entry::User(UserEntry {
                     uuid: user.uuid,
+                    previous_uuid,
                     text,
                     images,
                     timestamp: now,
@@ -883,5 +904,40 @@ mod tests {
         let call = conversation.tool_call("t10").unwrap();
         assert_eq!(call.parent_tool_use_id.as_deref(), Some("t9"));
         assert_eq!(conversation.running_tool, None);
+    }
+
+    #[test]
+    fn prompts_remember_the_message_before_them() {
+        let mut conversation = Conversation::default();
+        for line in [
+            r#"{"type":"user","message":{"role":"user","content":"first"},"uuid":"u1"}"#,
+            r#"{"type":"assistant","uuid":"a1","message":{"id":"m1","content":[{"type":"text","text":"ok"}]}}"#,
+            r#"{"type":"assistant","uuid":"sub","parent_tool_use_id":"t9","message":{"id":"m2","content":[{"type":"text","text":"subagent"}]}}"#,
+        ] {
+            conversation.apply(CliMessage::parse(line).unwrap(), Utc::now());
+        }
+        conversation.push_user_prompt("second".into(), 0, Utc::now());
+        conversation.apply(
+            CliMessage::parse(
+                r#"{"type":"user","message":{"role":"user","content":"second"},"uuid":"u2","isReplay":true}"#,
+            )
+            .unwrap(),
+            Utc::now(),
+        );
+        let users: Vec<_> = conversation
+            .entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::User(user) => Some((user.uuid.clone(), user.previous_uuid.clone())),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            users,
+            vec![
+                (Some("u1".into()), None),
+                (Some("u2".into()), Some("a1".into())),
+            ]
+        );
     }
 }

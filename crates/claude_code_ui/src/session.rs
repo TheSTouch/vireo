@@ -86,6 +86,7 @@ pub struct ClaudeSession {
     request_counter: u64,
     resume: Option<String>,
     fork_session: bool,
+    resume_session_at: Option<String>,
     model: Option<String>,
     ide: Option<WeakEntity<claude_ide::ClaudeIde>>,
     _events: Option<Task<()>>,
@@ -115,6 +116,7 @@ impl ClaudeSession {
             request_counter: 0,
             resume,
             fork_session: false,
+            resume_session_at: None,
             model: None,
             ide: None,
             _events: None,
@@ -139,6 +141,11 @@ impl ClaudeSession {
         self.fork_session = fork;
     }
 
+    /// Forks only the part of the session up to this message.
+    pub fn set_resume_session_at(&mut self, message_id: Option<String>) {
+        self.resume_session_at = message_id;
+    }
+
     fn launch_options(&self, cx: &App) -> LaunchOptions {
         let settings = ClaudeCodeSettings::get_global(cx);
         let python_environment = if settings.use_python_environment {
@@ -150,6 +157,7 @@ impl ClaudeSession {
             cwd: self.cwd.clone(),
             resume: self.conversation.session_id.clone().or(self.resume.clone()),
             fork_session: self.fork_session,
+            resume_session_at: self.resume_session_at.clone(),
             permission_mode: self.conversation.permission_mode,
             model: self.model.clone(),
             max_thinking_tokens: None,
@@ -185,6 +193,7 @@ impl ClaudeSession {
         self.process = Some(process);
         self.status = ProcessStatus::Running;
         self.fork_session = false;
+        self.resume_session_at = None;
         self._events = Some(cx.spawn(async move |this, cx| {
             Self::pump_events(this, events, cx).await;
         }));
