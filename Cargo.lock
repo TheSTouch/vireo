@@ -3041,12 +3041,19 @@ name = "claude_code_ui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "chrono",
  "claude_ide",
+ "editor",
+ "fs",
  "futures 0.3.34",
+ "fuzzy",
  "gpui",
+ "language",
  "log",
+ "markdown",
  "paths",
+ "picker",
  "project",
  "rand 0.9.4",
  "release_channel",
@@ -3054,7 +3061,11 @@ dependencies = [
  "serde_json",
  "settings",
  "tempfile",
+ "theme",
+ "theme_settings",
+ "ui",
  "util",
+ "workspace",
 ]
 
 [[package]]

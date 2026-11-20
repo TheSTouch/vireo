@@ -22,17 +22,17 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 
 | Extension command | Title | Behaviour | Vireo action | Item | Status |
 | --- | --- | --- | --- | --- | --- |
-| `claude-vscode.editor.open` | Open in New Tab | Opens a new conversation in an editor tab. | `claude_code::OpenInNewTab` | B-4 | Todo |
-| `claude-vscode.editor.openLast` | Open | Editor title-bar button. Opens Claude where it was last opened (`preferredLocation`). | `claude_code::Open` | B-4 | Todo |
-| `claude-vscode.primaryEditor.open` | Open in Primary Editor | Opens Claude in the main editor group. | `claude_code::OpenInPrimaryEditor` | B-4 | Todo |
-| `claude-vscode.window.open` | Open in New Window | Opens Claude alone in a new window. | `claude_code::OpenInNewWindow` | B-4 | Todo |
-| `claude-vscode.sidebar.open` | Open in Side Bar | Opens Claude in the secondary side bar. | `claude_code::OpenInSideBar` (right dock) | B-4 | Todo |
-| `claude-vscode.newConversation` | New Conversation | Starts a new conversation in the focused Claude view. | `claude_code::NewConversation` | B-4 | Todo |
+| `claude-vscode.editor.open` | Open in New Tab | Opens a new conversation in an editor tab. | `claude_code::OpenInNewTab` | B-4 | Done |
+| `claude-vscode.editor.openLast` | Open | Editor title-bar button. Opens Claude where it was last opened (`preferredLocation`). | `claude_code::Open` | B-4 | Done |
+| `claude-vscode.primaryEditor.open` | Open in Primary Editor | Opens Claude in the main editor group. | `claude_code::OpenInPrimaryEditor` | B-4 | Done |
+| `claude-vscode.window.open` | Open in New Window | Opens Claude alone in a new window. | `claude_code::OpenInNewWindow` | B-4 | Done |
+| `claude-vscode.sidebar.open` | Open in Side Bar | Opens Claude in the secondary side bar. | `claude_code::OpenInSideBar` (right dock) | B-4 | Done |
+| `claude-vscode.newConversation` | New Conversation | Starts a new conversation in the focused Claude view. | `claude_code::NewConversation` | B-4 | Done |
 | `claude-vscode.reopenClosedSession` | Reopen Closed Session | Reopens the most recently closed session tab. | `claude_code::ReopenClosedSession` | B-6 | Todo |
 | `claude-vscode.update` | Update extension | Updates the extension. | — | — | N/A: Vireo ships the panel in the app; it updates with Vireo. |
-| `claude-vscode.focus` | Focus input | Moves focus to the message box. | `claude_code::FocusInput` | B-4 | Todo |
-| `claude-vscode.focusLastMessage` | Focus last message | Moves focus to the last message, for screen readers. | `claude_code::FocusLastMessage` | B-4 | Todo |
-| `claude-vscode.blur` | Blur input | Gives focus back to the editor. | `claude_code::BlurInput` | B-4 | Todo |
+| `claude-vscode.focus` | Focus input | Moves focus to the message box. | `claude_code::FocusInput` | B-4 | Done |
+| `claude-vscode.focusLastMessage` | Focus last message | Moves focus to the last message, for screen readers. | `claude_code::FocusLastMessage` | B-4 | Done |
+| `claude-vscode.blur` | Blur input | Gives focus back to the editor. | `claude_code::BlurInput` | B-4 | Done |
 | `claude-vscode.logout` | Logout | Runs the CLI's logout. | `claude_code::Logout` | B-8 | Todo |
 | `claude-vscode.terminal.open` | Open in Terminal | Runs `claude` in an integrated terminal. | `claude_code::OpenInTerminal` | B-8 | Todo |
 | `claude-vscode.acceptProposedDiff` | Accept Proposed Changes | Accepts the whole proposed diff. | `claude_code::AcceptProposedDiff` | B-5 | Todo |
@@ -41,14 +41,14 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.rejectProposedHunk` | Reject Change at Cursor | Rejects the hunk under the cursor. | `claude_code::RejectProposedHunk` | B-5 | Todo |
 | `claude-vscode.acceptProposedHunkFromBar` | Accept this change | Button on the per-hunk comment bar. | Hunk button calling `AcceptProposedHunk` | B-5 | Todo |
 | `claude-vscode.rejectProposedHunkFromBar` | Reject this change | Button on the per-hunk comment bar. | Hunk button calling `RejectProposedHunk` | B-5 | Todo |
-| `claude-vscode.insertAtMention` | Insert @-Mention Reference | Inserts `@file#start-end` for the editor selection into the message box. | `claude_code::InsertAtMention` | B-4 | Todo |
+| `claude-vscode.insertAtMention` | Insert @-Mention Reference | Inserts `@file#start-end` for the editor selection into the message box. | `claude_code::InsertAtMention` | B-4 | Done |
 | `claude-vscode.addToChat` | Add to Chat | Explorer context menu: adds a file or folder as an @-mention. | `claude_code::AddToChat` | B-8 | Todo |
 | `claude-vscode.installPlugin` | Install Plugin | Installs a Claude Code plugin by name. | `claude_code::InstallPlugin` | B-8 | Todo |
 | `claude-code.acceptProposedDiff` | Accept Proposed Changes | Terminal-mode (`/ide`) variant: accepts a diff opened by `openDiff`. | `claude_code::AcceptProposedDiff` (same action) | B-5 | Todo |
 | `claude-code.rejectProposedDiff` | Reject Proposed Changes | Terminal-mode variant. | `claude_code::RejectProposedDiff` (same action) | B-5 | Todo |
 | `claude-code.insertAtMentioned` | Insert At-Mentioned | Terminal mode: sends an `at_mentioned` notification to the connected CLI. | `claude_code::InsertAtMentioned` | B-3 | Todo: the server sends `at_mentioned`; the action lands with B-4 |
 | `claude-vscode.showLogs` | Show Logs | Opens the extension's log channel. | `claude_code::ShowLogs` | B-8 | Todo |
-| `claude-vscode.toggleFocusView` | Toggle Focus view | Hides tool calls and activity, showing only prompts and replies. | `claude_code::ToggleFocusView` | B-4 | Todo |
+| `claude-vscode.toggleFocusView` | Toggle Focus view | Hides tool calls and activity, showing only prompts and replies. | `claude_code::ToggleFocusView` | B-4 | Done |
 | `claude-vscode.openWalkthrough` | Open Walkthrough | Opens the "Get started" walkthrough. | `claude_code::OpenWalkthrough` | B-8 | Todo |
 | `claude-vscode.markSessionUnread` | Mark Session as Unread | Marks the session tab unread. | `claude_code::MarkSessionUnread` | B-6 | Todo |
 | `claude-vscode.renameSessionTab` | Rename Session Tab | Renames the session. | `claude_code::RenameSession` | B-6 | Todo |
@@ -73,8 +73,8 @@ Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the 
 | `ctrl-alt-f` | Toggle Focus view | Claude focused | `claude_code::ToggleFocusView` in `ClaudeCode` context | B-7 | Todo |
 | `cmd-shift-t` / `ctrl-shift-t` | Reopen Closed Session | `enableReopenClosedSessionShortcut` and a Claude tab was closed last | `claude_code::ReopenClosedSession` in `ClaudeCode` context | B-7 | Todo |
 | `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` | B-8 | Todo |
-| `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4 | Todo |
-| `escape` | Stop the running turn | Claude focused while running | `claude_code::Interrupt` | B-4 | Todo |
+| `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4 | Done |
+| `escape` | Stop the running turn | Claude focused while running | `claude_code::Interrupt` | B-4 | Done |
 
 ## Settings
 
@@ -85,26 +85,26 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | --- | --- | --- | --- | --- | --- |
 | `environmentVariables` | array of `{name, value}`, `[]` | Extra environment for the `claude` process. | `environment_variables` | B-2 | Done |
 | `useTerminal` | bool, `false` | Run Claude in the terminal instead of the native UI. | `use_terminal` | B-8 | Todo |
-| `allowDangerouslySkipPermissions` | bool, unset (false) | Adds "Bypass permissions" to the mode menu. | `allow_dangerously_skip_permissions` | B-4 | Todo |
+| `allowDangerouslySkipPermissions` | bool, unset (false) | Adds "Bypass permissions" to the mode menu. | `allow_dangerously_skip_permissions` | B-4 | Done |
 | `claudeProcessWrapper` | string, unset | Executable used to launch Claude; the `claude` path is passed to it. | `claude_process_wrapper` | B-2 | Done |
-| `respectGitIgnore` | bool, `true` | File search for @-mentions respects `.gitignore`. | `respect_git_ignore` | B-4 | Todo |
+| `respectGitIgnore` | bool, `true` | File search for @-mentions respects `.gitignore`. | `respect_git_ignore` | B-4 | Done |
 | `initialPermissionMode` | enum `default`, `manual`, `acceptEdits`, `plan`, `bypassPermissions`; unset | Mode of new conversations; `manual` is an alias of `default`. | `initial_permission_mode` | B-2 | Done |
 | `disableLoginPrompt` | bool, `false` | Never show the login screen. | `disable_login_prompt` | B-8 | Todo |
 | `autosave` | bool, `true` | Save dirty buffers before Claude reads or writes them. | `autosave` | B-2 | Done |
-| `focusView` | bool, `false` | Start in focus view. | `focus_view` | B-4 | Todo |
-| `useCtrlEnterToSend` | bool, `false` | Cmd/Ctrl+Enter sends, Enter inserts a newline. | `use_ctrl_enter_to_send` | B-4 | Todo |
-| `preferredLocation` | `sidebar` or `panel`, `panel` | Where Claude opens; updated when the user opens it elsewhere. | `preferred_location` | B-4 | Todo |
-| `lockEditorGroups` | bool, `true` | Lock the editor group of a Claude tab. | `lock_editor_groups` | B-4 | Todo |
+| `focusView` | bool, `false` | Start in focus view. | `focus_view` | B-4 | Done |
+| `useCtrlEnterToSend` | bool, `false` | Cmd/Ctrl+Enter sends, Enter inserts a newline. | `use_ctrl_enter_to_send` | B-4 | Done |
+| `preferredLocation` | `sidebar` or `panel`, `panel` | Where Claude opens; updated when the user opens it elsewhere. | `preferred_location` | B-4 | Partial: `Open` and the focus key follow it (`panel` = an editor tab, `sidebar` = the right dock); it is not yet updated when Claude is opened elsewhere |
+| `lockEditorGroups` | bool, `true` | Lock the editor group of a Claude tab. | `lock_editor_groups` | B-4 | Todo: read but not applied; Vireo has no locked panes yet |
 | `enableNewConversationShortcut` | bool, `false` | Enables Cmd/Ctrl+N for a new conversation. | `enable_new_conversation_shortcut` | B-7 | Todo |
 | `enableReopenClosedSessionShortcut` | bool, `true` | Enables Cmd/Ctrl+Shift+T for the last closed session. | `enable_reopen_closed_session_shortcut` | B-7 | Todo |
 | `hideOnboarding` | bool, `false` | Hide the onboarding checklist. | `hide_onboarding` | B-8 | Todo |
-| `attachOpenFile` | bool, `true` | Attach the open file to messages and show it as a chip. | `attach_open_file` | B-4 | Todo |
-| `attachSelection` | bool, `true` | Attach the editor selection to messages and show it as a chip. | `attach_selection` | B-4 | Todo |
+| `attachOpenFile` | bool, `true` | Attach the open file to messages and show it as a chip. | `attach_open_file` | B-4 | Done |
+| `attachSelection` | bool, `true` | Attach the editor selection to messages and show it as a chip. | `attach_selection` | B-4 | Done |
 | `continueAfterReload` | bool, `true` | After a reload, a restored session continues the interrupted step. | `continue_after_reload` | B-6 | Todo |
-| `scrollToBottomOnSend` | bool, `true` | Scroll to the bottom on send. | `scroll_to_bottom_on_send` | B-4 | Todo |
-| `showMessageTimestamps` | bool, `true` | Show message times and a date line when the day changes. | `show_message_timestamps` | B-4 | Todo |
-| `promptSuggestions` | bool, `true` | Show a suggested next prompt in the empty message box. | `prompt_suggestions` | B-4 | Todo |
-| `spinnerVerbs` | `{mode: append or replace, verbs: []}` | Verbs shown while Claude works. | `spinner_verbs` | B-4 | Todo |
+| `scrollToBottomOnSend` | bool, `true` | Scroll to the bottom on send. | `scroll_to_bottom_on_send` | B-4 | Done |
+| `showMessageTimestamps` | bool, `true` | Show message times and a date line when the day changes. | `show_message_timestamps` | B-4 | Done |
+| `promptSuggestions` | bool, `true` | Show a suggested next prompt in the empty message box. | `prompt_suggestions` | B-4 | Done |
+| `spinnerVerbs` | `{mode: append or replace, verbs: []}` | Verbs shown while Claude works. | `spinner_verbs` | B-4 | Done |
 | `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Todo |
 | `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Done |
 
@@ -117,8 +117,8 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | Comment bar on each hunk | "Accept this change" / "Reject this change". | Per-hunk accept / reject buttons. | B-5 | Todo |
 | Explorer context menu | "Claude Code: Add to Chat" on files and folders, not on roots. | Project panel context menu entry. | B-8 | Todo |
 | Session tab context menu | Mark Session as Unread, Rename Session Tab, Add Session Tab to Group. | Tab context menu and sessions list menu. | B-6 | Todo |
-| Activity bar / secondary side bar | Claude Code view container; a separate sessions-list view when enabled. | Right dock panel with its own sessions list. | B-4, B-6 | Todo |
-| Status bar | "✻ Claude Code" item that opens Claude. | Dock button with Claude's icon. | B-4 | Todo |
+| Activity bar / secondary side bar | Claude Code view container; a separate sessions-list view when enabled. | Right dock panel with its own sessions list. | B-4, B-6 | Done |
+| Status bar | "✻ Claude Code" item that opens Claude. | Dock button with Claude's icon. | B-4 | Done |
 | Walkthrough "Get started with Claude Code" | Steps: welcome, open Claude Code, chat with Claude, past conversations. | Onboarding checklist in the empty panel. | B-8 | Todo |
 | URI handler | `vscode://anthropic.claude-code/open?prompt=…&session=…` pre-fills a prompt or resumes a session. | `zed://claude-code/open?…` | B-8 | Todo |
 
@@ -128,31 +128,31 @@ Observed in the running extension, version 2.1.328.
 
 | Feature | Extension behaviour | Item | Status |
 | --- | --- | --- | --- |
-| Header | Session title on the left. On the right: bookmarks, session history (clock icon), new conversation (+). | B-4 | Todo |
-| Message list | User messages in a bordered box. Assistant output hangs off a vertical timeline with a dot per step: text, thinking, tool calls. | B-4 | Todo |
-| Markdown | Assistant text renders as Markdown: headings, lists, links, inline code, code blocks. | B-4 | Todo |
-| Thinking | Collapsed row "Thought for Ns"; expands to the thinking text. "Thinking…" while it streams. | B-4 | Todo |
-| Tool-call blocks | A row naming the tool and its description, e.g. "Bash  Check the build result". Expanded, an IN block shows the input and an OUT block the result. The dot is green on success, red on error, animated while running. | B-4 | Todo |
-| Edit / Write blocks | File name and a small inline diff of the change. | B-4 | Todo |
-| Permission prompts | Inline card for a tool that needs approval: "Yes", "Yes, and don't ask again" (or "Yes, allow all edits this session"), and "No" with a "Tell Claude what to do instead" field. Up/down and number keys pick an option. | B-4 | Todo |
-| Plan approval | In plan mode, the plan is shown for approval, with an option to keep planning. | B-4 | Todo |
-| AskUserQuestion | Questions from Claude render as a picker with options and free text. | B-4 | Todo |
-| Mode switcher | Button at the bottom right of the input box. Modes: Auto, Manual (`default`), Edit automatically (`acceptEdits`), Plan (`plan`), and Bypass permissions (`bypassPermissions`) only when `allowDangerouslySkipPermissions` is on. Shift+Tab cycles. | B-4 | Todo |
-| Model picker | Pill "Opus 5.5 High": model and effort level. Opens a menu of models and effort levels. | B-4 | Todo |
-| Thinking toggle | In the model / command menu: thinking on or off. | B-4 | Todo |
-| Slash commands | "/" button and typing "/" open a menu of commands from the CLI's `slash_commands` list and local actions: clear conversation, new conversation, focus view, account and usage, switch model, and so on. | B-4 | Todo |
-| @-mentions | Typing "@" opens a fuzzy file and folder picker ("Mention file from this project…"); folders end in "/". `@terminal:name` references a terminal. | B-4 | Todo |
-| Attach button (+) | Menu: "Upload from computer" / "Attach file…", "Add context", "Mention file from this project…". | B-4 | Todo |
-| Image paste | Pasting or dropping an image adds an image chip; it is sent as a base64 image block. | B-4 | Todo |
-| Attachment chips | Chips above the text for the open file, the selection (`file#5-10`), images and mentions; each removable. | B-4 | Todo |
-| Prompt suggestions | After a reply, the empty input shows a suggested next prompt in italics; Tab accepts it. | B-4 | Todo |
-| Timestamps | Time at the right of each message; a date line when the day changes. | B-4 | Todo |
-| Status banner | Banner above the input, e.g. "Browser connected", dismissible. | B-4 | Partial target: generic banner only |
-| Usage display | Clock icon with time until the session limit resets ("59m"); "Account & usage" shows session and weekly limits. Context usage per conversation. | B-4 | Todo |
-| Spinner | While working: a verb from the spinner list, or "Running <tool>…". | B-4 | Todo |
-| Queued messages | A message sent while Claude works is queued ("Message queued."). | B-4 | Todo |
-| Stop | Stop button and Escape interrupt the turn. | B-4 | Todo |
-| Focus view | Hides tool calls and thinking; a live indicator names the running tool. | B-4 | Todo |
+| Header | Session title on the left. On the right: bookmarks, session history (clock icon), new conversation (+). | B-4 | Partial: title, focus view, past conversations and new conversation; no bookmarks list |
+| Message list | User messages in a bordered box. Assistant output hangs off a vertical timeline with a dot per step: text, thinking, tool calls. | B-4 | Done |
+| Markdown | Assistant text renders as Markdown: headings, lists, links, inline code, code blocks. | B-4 | Done |
+| Thinking | Collapsed row "Thought for Ns"; expands to the thinking text. "Thinking…" while it streams. | B-4 | Done |
+| Tool-call blocks | A row naming the tool and its description, e.g. "Bash  Check the build result". Expanded, an IN block shows the input and an OUT block the result. The dot is green on success, red on error, animated while running. | B-4 | Done |
+| Edit / Write blocks | File name and a small inline diff of the change. | B-4 | Partial: the file and the old and new text; the real diff opens in the review view (B-5) |
+| Permission prompts | Inline card for a tool that needs approval: "Yes", "Yes, and don't ask again" (or "Yes, allow all edits this session"), and "No" with a "Tell Claude what to do instead" field. Up/down and number keys pick an option. | B-4 | Partial: Yes, Yes and don't ask again (sends the CLI's suggestions), No with a message; number keys are not bound |
+| Plan approval | In plan mode, the plan is shown for approval, with an option to keep planning. | B-4 | Partial: shown as the permission card of the plan tool |
+| AskUserQuestion | Questions from Claude render as a picker with options and free text. | B-4 | Todo: shown as a generic permission card |
+| Mode switcher | Button at the bottom right of the input box. Modes: Auto, Manual (`default`), Edit automatically (`acceptEdits`), Plan (`plan`), and Bypass permissions (`bypassPermissions`) only when `allowDangerouslySkipPermissions` is on. Shift+Tab cycles. | B-4 | Done |
+| Model picker | Pill "Opus 5.5 High": model and effort level. Opens a menu of models and effort levels. | B-4 | Partial: models from the CLI; no effort levels |
+| Thinking toggle | In the model / command menu: thinking on or off. | B-4 | Done |
+| Slash commands | "/" button and typing "/" open a menu of commands from the CLI's `slash_commands` list and local actions: clear conversation, new conversation, focus view, account and usage, switch model, and so on. | B-4 | Partial: the / menu lists the CLI's commands and local actions; typing / does not open it |
+| @-mentions | Typing "@" opens a fuzzy file and folder picker ("Mention file from this project…"); folders end in "/". `@terminal:name` references a terminal. | B-4 | Partial: "Mention file from this project…" opens a fuzzy picker; typing @ does not open it; `@terminal:` is not offered |
+| Attach button (+) | Menu: "Upload from computer" / "Attach file…", "Add context", "Mention file from this project…". | B-4 | Done |
+| Image paste | Pasting or dropping an image adds an image chip; it is sent as a base64 image block. | B-4 | Done |
+| Attachment chips | Chips above the text for the open file, the selection (`file#5-10`), images and mentions; each removable. | B-4 | Done |
+| Prompt suggestions | After a reply, the empty input shows a suggested next prompt in italics; Tab accepts it. | B-4 | Done |
+| Timestamps | Time at the right of each message; a date line when the day changes. | B-4 | Done |
+| Status banner | Banner above the input, e.g. "Browser connected", dismissible. | B-4 | Done |
+| Usage display | Clock icon with time until the session limit resets ("59m"); "Account & usage" shows session and weekly limits. Context usage per conversation. | B-4 | Partial: time to the rate-limit reset, context tokens and cost in a tooltip; no Account & usage view |
+| Spinner | While working: a verb from the spinner list, or "Running <tool>…". | B-4 | Done |
+| Queued messages | A message sent while Claude works is queued ("Message queued."). | B-4 | Done |
+| Stop | Stop button and Escape interrupt the turn. | B-4 | Done |
+| Focus view | Hides tool calls and thinking; a live indicator names the running tool. | B-4 | Done |
 | Rewind and fork | Hover a user message: "Fork conversation from here", "Rewind code to here", "Fork conversation and rewind code". | B-6 | Todo |
 | Copy and bookmark | "Copy response" and "Bookmark response" under each reply; a bookmarks list in the header. | B-4 | Todo |
 | Sessions list | History button: search ("Search sessions…"), groups, archived sessions, rename, archive, mark unread. | B-6 | Todo |

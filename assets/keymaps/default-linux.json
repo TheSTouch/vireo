@@ -1735,4 +1735,44 @@
       "escape": "tabular_data::ClearSelection",
     },
   },
+  // Claude Code panel: the message box and the conversation.
+  {
+    "context": "ClaudeCode",
+    "bindings": {
+      "escape": "claude_code::Interrupt",
+      "shift-tab": "claude_code::CycleMode",
+    },
+  },
+  {
+    "context": "ClaudeCodeInput > Editor",
+    "bindings": {
+      "escape": "claude_code::Interrupt",
+      "shift-tab": "claude_code::CycleMode",
+    },
+  },
+  {
+    "context": "ClaudeCodeInput > Editor && !use_ctrl_enter_to_send",
+    "bindings": {
+      "enter": "claude_code::Send",
+      "shift-enter": "editor::Newline",
+    },
+  },
+  {
+    "context": "ClaudeCodeInput > Editor && use_ctrl_enter_to_send",
+    "bindings": {
+      "ctrl-enter": "claude_code::Send",
+    },
+  },
+  {
+    "context": "ClaudeCodeInput > Editor && has_suggestion",
+    "bindings": {
+      "tab": "claude_code::AcceptSuggestion",
+    },
+  },
+  {
+    "context": "ClaudeCodeDenyInput > Editor",
+    "bindings": {
+      "enter": "claude_code::DenyPermission",
+    },
+  },
 ]
