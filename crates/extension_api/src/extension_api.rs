@@ -324,6 +324,9 @@ pub trait Extension: Send + Sync {
     ) -> Result<(), String> {
         Ok(())
     }
+
+    /// Called when a path watched with [`addon::workspace::watch_path`] changes.
+    fn files_changed(&mut self, _watch_id: u64, _paths: Vec<String>) {}
 }
 
 /// Registers the provided type as a Zed extension.
@@ -624,6 +627,10 @@ impl wit::Guest for Component {
         event: addon::ui::ViewEvent,
     ) -> Result<(), String> {
         extension().handle_view_event(&view_id, &element_id, event)
+    }
+
+    fn files_changed(watch_id: u64, paths: Vec<String>) {
+        extension().files_changed(watch_id, paths)
     }
 }
 

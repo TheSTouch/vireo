@@ -44,4 +44,21 @@ interface editor {
 
     /// Removes the decorations of the collection `collection` from every file.
     clear-decorations: func(collection: string);
+
+    /// The active editor of the active workspace.
+    record active-editor {
+        /// The absolute path of the file it shows, if it shows one.
+        path: option<string>,
+        /// The newest selection; empty when it is only a cursor.
+        selection: text-range,
+        selected-text: string,
+    }
+
+    get-active-editor: func() -> option<active-editor>;
+
+    /// The full text of the active editor.
+    get-active-editor-text: func() -> option<string>;
+
+    /// Opens a file in the active workspace and moves the cursor to `position`.
+    open-file: func(path: string, position: option<position>) -> result<_, string>;
 }

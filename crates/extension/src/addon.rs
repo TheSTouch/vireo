@@ -4,7 +4,9 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use anyhow::Result;
 use collections::BTreeMap;
+use futures::future::BoxFuture;
 use gpui::App;
 use serde::{Deserialize, Serialize};
 
@@ -215,6 +217,31 @@ pub enum AddonDecoration {
     },
 }
 
+/// The active editor, as addons see it.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AddonActiveEditor {
+    /// The absolute path of the file the editor shows, if it shows one.
+    pub path: Option<PathBuf>,
+    /// The newest selection; empty when it is only a cursor.
+    pub selection: AddonTextRange,
+    pub selected_text: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AddonNotificationLevel {
+    Info,
+    Warning,
+    Error,
+}
+
+/// An item of a quick pick.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AddonQuickPickItem {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+}
+
 /// A status bar item that an addon shows with `set-status-item`.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct AddonStatusItem {
@@ -265,6 +292,67 @@ pub trait ExtensionAddonProxy: Send + Sync + 'static {
 
     /// Removes the decorations of one of the addon's collections from every file.
     fn clear_decorations(&self, extension_id: Arc<str>, collection: Arc<str>, cx: &mut App);
+
+    /// The active editor of the active workspace.
+    fn active_editor(&self, cx: &mut App) -> Option<AddonActiveEditor>;
+
+    /// The full text of the active editor of the active workspace.
+    fn active_editor_text(&self, cx: &mut App) -> Option<String>;
+
+    /// Opens a file in the active workspace, moving the cursor to `position`.
+    fn open_file(
+        &self,
+        path: PathBuf,
+        position: Option<AddonPosition>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Result<()>>;
+
+    fn show_notification(
+        &self,
+        extension_id: Arc<str>,
+        level: AddonNotificationLevel,
+        message: String,
+        cx: &mut App,
+    );
+
+    /// Lets the user pick an item; resolves to its ID, or `None` when dismissed.
+    fn quick_pick(
+        &self,
+        items: Vec<AddonQuickPickItem>,
+        placeholder: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Option<String>>;
+
+    /// Asks the user for a line of text; resolves to `None` when dismissed.
+    fn input_box(
+        &self,
+        prompt: String,
+        value: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Option<String>>;
+
+    /// The absolute paths of the folders of the active workspace.
+    fn workspace_folders(&self, cx: &mut App) -> Vec<PathBuf>;
+
+    /// Starts watching a path; changes are reported to the addon's
+    /// `files-changed` export with the returned ID.
+    fn watch_path(&self, extension_id: Arc<str>, path: PathBuf, cx: &mut App) -> u64;
+
+    fn unwatch_path(&self, extension_id: Arc<str>, watch_id: u64, cx: &mut App);
+
+    /// The addon's settings, as JSON.
+    fn addon_settings(&self, extension_id: Arc<str>, cx: &mut App) -> Option<String>;
+
+    fn storage_get(&self, extension_id: Arc<str>, key: String, cx: &mut App) -> Option<String>;
+
+    /// Stores a value in the addon's persistent storage, or removes it.
+    fn storage_set(
+        &self,
+        extension_id: Arc<str>,
+        key: String,
+        value: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Result<()>>;
 }
 
 impl ExtensionAddonProxy for ExtensionHostProxy {
@@ -335,6 +423,101 @@ impl ExtensionAddonProxy for ExtensionHostProxy {
             return;
         };
         proxy.clear_decorations(extension_id, collection, cx)
+    }
+
+    fn active_editor(&self, cx: &mut App) -> Option<AddonActiveEditor> {
+        self.addon_proxy()?.active_editor(cx)
+    }
+
+    fn active_editor_text(&self, cx: &mut App) -> Option<String> {
+        self.addon_proxy()?.active_editor_text(cx)
+    }
+
+    fn open_file(
+        &self,
+        path: PathBuf,
+        position: Option<AddonPosition>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Result<()>> {
+        match self.addon_proxy() {
+            Some(proxy) => proxy.open_file(path, position, cx),
+            None => Box::pin(async { Err(anyhow::anyhow!("the addon UI is not available")) }),
+        }
+    }
+
+    fn show_notification(
+        &self,
+        extension_id: Arc<str>,
+        level: AddonNotificationLevel,
+        message: String,
+        cx: &mut App,
+    ) {
+        if let Some(proxy) = self.addon_proxy() {
+            proxy.show_notification(extension_id, level, message, cx)
+        }
+    }
+
+    fn quick_pick(
+        &self,
+        items: Vec<AddonQuickPickItem>,
+        placeholder: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Option<String>> {
+        match self.addon_proxy() {
+            Some(proxy) => proxy.quick_pick(items, placeholder, cx),
+            None => Box::pin(async { None }),
+        }
+    }
+
+    fn input_box(
+        &self,
+        prompt: String,
+        value: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Option<String>> {
+        match self.addon_proxy() {
+            Some(proxy) => proxy.input_box(prompt, value, cx),
+            None => Box::pin(async { None }),
+        }
+    }
+
+    fn workspace_folders(&self, cx: &mut App) -> Vec<PathBuf> {
+        self.addon_proxy()
+            .map(|proxy| proxy.workspace_folders(cx))
+            .unwrap_or_default()
+    }
+
+    fn watch_path(&self, extension_id: Arc<str>, path: PathBuf, cx: &mut App) -> u64 {
+        self.addon_proxy()
+            .map(|proxy| proxy.watch_path(extension_id, path, cx))
+            .unwrap_or_default()
+    }
+
+    fn unwatch_path(&self, extension_id: Arc<str>, watch_id: u64, cx: &mut App) {
+        if let Some(proxy) = self.addon_proxy() {
+            proxy.unwatch_path(extension_id, watch_id, cx)
+        }
+    }
+
+    fn addon_settings(&self, extension_id: Arc<str>, cx: &mut App) -> Option<String> {
+        self.addon_proxy()?.addon_settings(extension_id, cx)
+    }
+
+    fn storage_get(&self, extension_id: Arc<str>, key: String, cx: &mut App) -> Option<String> {
+        self.addon_proxy()?.storage_get(extension_id, key, cx)
+    }
+
+    fn storage_set(
+        &self,
+        extension_id: Arc<str>,
+        key: String,
+        value: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Result<()>> {
+        match self.addon_proxy() {
+            Some(proxy) => proxy.storage_set(extension_id, key, value, cx),
+            None => Box::pin(async { Err(anyhow::anyhow!("the addon UI is not available")) }),
+        }
     }
 }
 

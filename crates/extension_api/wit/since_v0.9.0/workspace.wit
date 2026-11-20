@@ -1,0 +1,63 @@
+/// Workspace services for Vireo addons: notifications, prompts, files,
+/// settings and storage.
+///
+/// Everything in this interface is new in v0.9.0 and is specific to Vireo.
+/// Paths are absolute. Files can only be read and watched inside the folders
+/// of the active workspace.
+interface workspace {
+    enum notification-level {
+        info,
+        warning,
+        error,
+    }
+
+    /// Shows a notification in the active workspace.
+    show-notification: func(level: notification-level, message: string);
+
+    /// An item of a quick pick.
+    record quick-pick-item {
+        /// Returned by `quick-pick` when the item is picked.
+        id: string,
+        label: string,
+        /// Shown dimmed after the label.
+        description: option<string>,
+    }
+
+    /// Lets the user pick one of `items`, filtering them by typing. Returns the
+    /// picked item's ID, or none when the user dismisses the picker. Blocks
+    /// until the user answers.
+    quick-pick: func(items: list<quick-pick-item>, placeholder: option<string>) -> option<string>;
+
+    /// Asks the user for a line of text, starting from `value`. Returns the
+    /// text, or none when the user dismisses the box. Blocks until the user
+    /// answers.
+    input-box: func(prompt: string, value: option<string>) -> option<string>;
+
+    /// The absolute paths of the folders of the active workspace.
+    workspace-folders: func() -> list<string>;
+
+    /// Reads a UTF-8 file inside the workspace folders.
+    read-file: func(path: string) -> result<string, string>;
+
+    /// Lists a directory inside the workspace folders. The names of
+    /// subdirectories end with `/`.
+    read-dir: func(path: string) -> result<list<string>, string>;
+
+    /// Watches a file or directory inside the workspace folders. Changes are
+    /// reported to the addon's `files-changed` export with the returned ID.
+    watch-path: func(path: string) -> result<u64, string>;
+
+    /// Stops a watch started with `watch-path`.
+    unwatch-path: func(watch-id: u64);
+
+    /// The addon's settings: the JSON value of `addons.<extension id>` in the
+    /// user's settings, or none.
+    get-addon-settings: func() -> option<string>;
+
+    /// Reads a value the addon stored with `storage-set`.
+    storage-get: func(key: string) -> option<string>;
+
+    /// Stores a value that persists across restarts, or removes it when
+    /// `value` is none. Each addon has its own storage.
+    storage-set: func(key: string, value: option<string>) -> result<_, string>;
+}

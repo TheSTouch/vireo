@@ -213,6 +213,12 @@ pub trait Extension: Send + Sync + 'static {
         bail!("extension cannot show view `{view_id}`: it predates the addon API")
     }
 
+    /// Tells the addon that paths it watches with `watch-path` changed.
+    async fn addon_files_changed(&self, watch_id: u64, paths: Vec<String>) -> Result<()> {
+        let _ = (watch_id, paths);
+        Ok(())
+    }
+
     /// Tells the addon that an element of one of its custom views was used.
     async fn addon_handle_view_event(
         &self,

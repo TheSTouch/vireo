@@ -258,6 +258,10 @@ pub struct SettingsContent {
     /// Default: false
     pub helix_mode: Option<bool>,
 
+    /// Settings of Vireo addons, by extension ID. An addon reads its own entry
+    /// with `get-addon-settings`.
+    pub addons: Option<HashMap<String, serde_json::Value>>,
+
     /// Determines when the mouse cursor should be hidden in response to
     /// keyboard input. Applies globally across all input surfaces (editors,
     /// terminals, palettes, etc.).
@@ -414,7 +418,7 @@ fallible_options::flattened_deserialize!(SettingsContent {
         call_hierarchy, command_palette, file_finder, git_panel, git_graph, tabs, tab_bar, tab_switcher, status_bar, preview_tabs, agent,
         agent_servers, claude_code, audio, auto_update, base_keymap, collaboration_panel, debugger, diagnostics,
         git,
-        global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, hide_mouse,
+        global_lsp_settings, image_viewer, markdown_preview, repl, helix_mode, addons, hide_mouse,
         journal, log, line_indicator_format, language_models, copilot, outline_panel, project_panel,
         node, proxy, reduce_motion, server_url, credentials_url, session, telemetry, terminal,
         title_bar, vim_mode, calls, which_key, vim, modeline_lines, feature_flags,

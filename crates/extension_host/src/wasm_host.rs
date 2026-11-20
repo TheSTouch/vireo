@@ -568,6 +568,19 @@ impl extension::Extension for WasmExtension {
         .await?
     }
 
+    async fn addon_files_changed(&self, watch_id: u64, paths: Vec<String>) -> Result<()> {
+        self.call(move |extension, store| {
+            async move {
+                extension
+                    .call_files_changed(store, watch_id, &paths)
+                    .await
+                    .map_err(|error| anyhow::anyhow!("{error:#}"))
+            }
+            .boxed()
+        })
+        .await?
+    }
+
     async fn addon_render_view(&self, view_id: Arc<str>) -> Result<extension::AddonViewTree> {
         self.call(move |extension, store| {
             async move {

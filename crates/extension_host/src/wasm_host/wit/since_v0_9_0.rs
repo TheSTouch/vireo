@@ -8,10 +8,12 @@
 use crate::wasm_host::WasmState;
 use anyhow::Result;
 use extension::{
-    AddonDecoration, AddonElement, AddonElementKind, AddonPosition, AddonSeverity, AddonStatusItem,
-    AddonTextRange, AddonTreeItem, AddonViewEvent, AddonViewTree, ExtensionAddonProxy as _,
-    ExtensionHostProxy, KeyValueStoreDelegate, ProjectDelegate, WorktreeDelegate,
+    AddonDecoration, AddonElement, AddonElementKind, AddonNotificationLevel, AddonPosition,
+    AddonQuickPickItem, AddonSeverity, AddonStatusItem, AddonTextRange, AddonTreeItem,
+    AddonViewEvent, AddonViewTree, ExtensionAddonProxy as _, ExtensionHostProxy,
+    KeyValueStoreDelegate, ProjectDelegate, WorktreeDelegate,
 };
+use futures::StreamExt as _;
 use gpui::{App, BackgroundExecutor};
 use semver::Version;
 use std::path::PathBuf;
@@ -408,6 +410,227 @@ impl editor::Host for WasmState {
         })
         .await
     }
+
+    async fn get_active_editor(&mut self) -> wasmtime::Result<Option<editor::ActiveEditor>> {
+        let active_editor = self
+            .on_addon_ui(|proxy, _, cx| proxy.active_editor(cx))
+            .await?;
+        Ok(active_editor.map(|active_editor| editor::ActiveEditor {
+            path: active_editor
+                .path
+                .map(|path| path.to_string_lossy().into_owned()),
+            selection: active_editor.selection.into(),
+            selected_text: active_editor.selected_text,
+        }))
+    }
+
+    async fn get_active_editor_text(&mut self) -> wasmtime::Result<Option<String>> {
+        self.on_addon_ui(|proxy, _, cx| proxy.active_editor_text(cx))
+            .await
+    }
+
+    async fn open_file(
+        &mut self,
+        path: String,
+        position: Option<editor::Position>,
+    ) -> wasmtime::Result<Result<(), String>> {
+        let opened = self
+            .on_addon_ui(move |proxy, _, cx| {
+                proxy.open_file(PathBuf::from(path), position.map(Into::into), cx)
+            })
+            .await?;
+        Ok(opened.await.map_err(|error| format!("{error:#}")))
+    }
+}
+
+impl From<AddonPosition> for editor::Position {
+    fn from(position: AddonPosition) -> Self {
+        Self {
+            line: position.line,
+            column: position.column,
+        }
+    }
+}
+
+impl From<AddonTextRange> for editor::TextRange {
+    fn from(range: AddonTextRange) -> Self {
+        Self {
+            start: range.start.into(),
+            end: range.end.into(),
+        }
+    }
+}
+
+impl WasmState {
+    /// Resolves `path` and checks that it is inside a folder of the active
+    /// workspace, so addons cannot read or watch other files.
+    fn workspace_path(
+        &self,
+        path: String,
+    ) -> impl 'static + Future<Output = wasmtime::Result<Result<PathBuf, String>>> {
+        let folders = self.on_addon_ui(|proxy, _, cx| proxy.workspace_folders(cx));
+        let fs = self.host.fs.clone();
+        async move {
+            let folders = folders.await?;
+            let path = PathBuf::from(path);
+            if !path.is_absolute() {
+                return Ok(Err(format!("`{}` is not an absolute path", path.display())));
+            }
+            let resolved = match fs.canonicalize(&path).await {
+                Ok(resolved) => resolved,
+                Err(error) => return Ok(Err(format!("`{}`: {error:#}", path.display()))),
+            };
+            for folder in folders {
+                let folder = fs.canonicalize(&folder).await.unwrap_or(folder);
+                if resolved.starts_with(&folder) {
+                    return Ok(Ok(resolved));
+                }
+            }
+            Ok(Err(format!(
+                "`{}` is outside the workspace folders",
+                path.display()
+            )))
+        }
+    }
+}
+
+impl workspace::Host for WasmState {
+    async fn show_notification(
+        &mut self,
+        level: workspace::NotificationLevel,
+        message: String,
+    ) -> wasmtime::Result<()> {
+        let level = match level {
+            workspace::NotificationLevel::Info => AddonNotificationLevel::Info,
+            workspace::NotificationLevel::Warning => AddonNotificationLevel::Warning,
+            workspace::NotificationLevel::Error => AddonNotificationLevel::Error,
+        };
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.show_notification(extension_id, level, message, cx)
+        })
+        .await
+    }
+
+    async fn quick_pick(
+        &mut self,
+        items: Vec<workspace::QuickPickItem>,
+        placeholder: Option<String>,
+    ) -> wasmtime::Result<Option<String>> {
+        let items = items
+            .into_iter()
+            .map(|item| AddonQuickPickItem {
+                id: item.id,
+                label: item.label,
+                description: item.description,
+            })
+            .collect();
+        let answer = self
+            .on_addon_ui(move |proxy, _, cx| proxy.quick_pick(items, placeholder, cx))
+            .await?;
+        Ok(answer.await)
+    }
+
+    async fn input_box(
+        &mut self,
+        prompt: String,
+        value: Option<String>,
+    ) -> wasmtime::Result<Option<String>> {
+        let answer = self
+            .on_addon_ui(move |proxy, _, cx| proxy.input_box(prompt, value, cx))
+            .await?;
+        Ok(answer.await)
+    }
+
+    async fn workspace_folders(&mut self) -> wasmtime::Result<Vec<String>> {
+        let folders = self
+            .on_addon_ui(|proxy, _, cx| proxy.workspace_folders(cx))
+            .await?;
+        Ok(folders
+            .into_iter()
+            .map(|folder| folder.to_string_lossy().into_owned())
+            .collect())
+    }
+
+    async fn read_file(&mut self, path: String) -> wasmtime::Result<Result<String, String>> {
+        let path = match self.workspace_path(path).await? {
+            Ok(path) => path,
+            Err(error) => return Ok(Err(error)),
+        };
+        Ok(self
+            .host
+            .fs
+            .load(&path)
+            .await
+            .map_err(|error| format!("`{}`: {error:#}", path.display())))
+    }
+
+    async fn read_dir(&mut self, path: String) -> wasmtime::Result<Result<Vec<String>, String>> {
+        let path = match self.workspace_path(path).await? {
+            Ok(path) => path,
+            Err(error) => return Ok(Err(error)),
+        };
+        let fs = self.host.fs.clone();
+        let mut entries = match fs.read_dir(&path).await {
+            Ok(entries) => entries,
+            Err(error) => return Ok(Err(format!("`{}`: {error:#}", path.display()))),
+        };
+        let mut names = Vec::new();
+        while let Some(entry) = entries.next().await {
+            let Ok(entry) = entry else {
+                continue;
+            };
+            let Some(name) = entry.file_name() else {
+                continue;
+            };
+            let mut name = name.to_string_lossy().into_owned();
+            if fs.is_dir(&entry).await {
+                name.push('/');
+            }
+            names.push(name);
+        }
+        names.sort();
+        Ok(Ok(names))
+    }
+
+    async fn watch_path(&mut self, path: String) -> wasmtime::Result<Result<u64, String>> {
+        let path = match self.workspace_path(path).await? {
+            Ok(path) => path,
+            Err(error) => return Ok(Err(error)),
+        };
+        self.on_addon_ui(move |proxy, extension_id, cx| proxy.watch_path(extension_id, path, cx))
+            .await
+            .map(Ok)
+    }
+
+    async fn unwatch_path(&mut self, watch_id: u64) -> wasmtime::Result<()> {
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.unwatch_path(extension_id, watch_id, cx)
+        })
+        .await
+    }
+
+    async fn get_addon_settings(&mut self) -> wasmtime::Result<Option<String>> {
+        self.on_addon_ui(|proxy, extension_id, cx| proxy.addon_settings(extension_id, cx))
+            .await
+    }
+
+    async fn storage_get(&mut self, key: String) -> wasmtime::Result<Option<String>> {
+        self.on_addon_ui(move |proxy, extension_id, cx| proxy.storage_get(extension_id, key, cx))
+            .await
+    }
+
+    async fn storage_set(
+        &mut self,
+        key: String,
+        value: Option<String>,
+    ) -> wasmtime::Result<Result<(), String>> {
+        let stored = self
+            .on_addon_ui(move |proxy, extension_id, cx| {
+                proxy.storage_set(extension_id, key, value, cx)
+            })
+            .await?;
+        Ok(stored.await.map_err(|error| format!("{error:#}")))
+    }
 }
 
 impl From<ui::TreeItem> for AddonTreeItem {
@@ -472,6 +695,20 @@ impl super::Extension {
         }
     }
 
+    pub async fn call_files_changed(
+        &self,
+        store: &mut wasmtime::Store<WasmState>,
+        watch_id: u64,
+        paths: &[String],
+    ) -> wasmtime::Result<()> {
+        match self {
+            super::Extension::V0_9_0(extension) => {
+                extension.call_files_changed(store, watch_id, paths).await
+            }
+            _ => Ok(()),
+        }
+    }
+
     pub async fn call_render_view(
         &self,
         store: &mut wasmtime::Store<WasmState>,
@@ -515,10 +752,12 @@ mod tests {
     use crate::capability_granter::CapabilityGranter;
     use crate::wasm_host::{WasmHost, WasmState};
     use extension::{
-        AddonDecoration, AddonStatusItem, ExtensionAddonProxy, ExtensionHostProxy,
+        AddonActiveEditor, AddonDecoration, AddonNotificationLevel, AddonPosition,
+        AddonQuickPickItem, AddonStatusItem, ExtensionAddonProxy, ExtensionHostProxy,
         ExtensionManifest,
     };
     use fs::FakeFs;
+    use futures::future::BoxFuture;
     use gpui::{App, TestAppContext};
     use http_client::FakeHttpClient;
     use node_runtime::NodeRuntime;
@@ -747,6 +986,7 @@ mod tests {
     #[derive(Clone, Default)]
     struct RecordingAddonProxy {
         calls: Arc<Mutex<Vec<String>>>,
+        storage: Arc<Mutex<std::collections::HashMap<(Arc<str>, String), String>>>,
     }
 
     impl ExtensionAddonProxy for RecordingAddonProxy {
@@ -803,6 +1043,102 @@ mod tests {
             self.calls
                 .lock()
                 .push(format!("clear {extension_id}/{collection}"));
+        }
+
+        fn active_editor(&self, _cx: &mut App) -> Option<AddonActiveEditor> {
+            None
+        }
+
+        fn active_editor_text(&self, _cx: &mut App) -> Option<String> {
+            None
+        }
+
+        fn open_file(
+            &self,
+            path: PathBuf,
+            _position: Option<AddonPosition>,
+            _cx: &mut App,
+        ) -> BoxFuture<'static, anyhow::Result<()>> {
+            self.calls
+                .lock()
+                .push(format!("open-file {}", path.display()));
+            Box::pin(async { Ok(()) })
+        }
+
+        fn show_notification(
+            &self,
+            extension_id: Arc<str>,
+            level: AddonNotificationLevel,
+            message: String,
+            _cx: &mut App,
+        ) {
+            self.calls
+                .lock()
+                .push(format!("notify {extension_id} {level:?} {message}"));
+        }
+
+        fn quick_pick(
+            &self,
+            items: Vec<AddonQuickPickItem>,
+            _placeholder: Option<String>,
+            _cx: &mut App,
+        ) -> BoxFuture<'static, Option<String>> {
+            let last = items.last().map(|item| item.id.clone());
+            Box::pin(async move { last })
+        }
+
+        fn input_box(
+            &self,
+            _prompt: String,
+            value: Option<String>,
+            _cx: &mut App,
+        ) -> BoxFuture<'static, Option<String>> {
+            Box::pin(async move { value })
+        }
+
+        fn workspace_folders(&self, _cx: &mut App) -> Vec<PathBuf> {
+            vec![PathBuf::from("/project")]
+        }
+
+        fn watch_path(&self, extension_id: Arc<str>, path: PathBuf, _cx: &mut App) -> u64 {
+            self.calls
+                .lock()
+                .push(format!("watch {extension_id} {}", path.display()));
+            7
+        }
+
+        fn unwatch_path(&self, extension_id: Arc<str>, watch_id: u64, _cx: &mut App) {
+            self.calls
+                .lock()
+                .push(format!("unwatch {extension_id} {watch_id}"));
+        }
+
+        fn addon_settings(&self, _extension_id: Arc<str>, _cx: &mut App) -> Option<String> {
+            Some(r#"{"greeting":"hi"}"#.into())
+        }
+
+        fn storage_get(
+            &self,
+            extension_id: Arc<str>,
+            key: String,
+            _cx: &mut App,
+        ) -> Option<String> {
+            self.storage.lock().get(&(extension_id, key)).cloned()
+        }
+
+        fn storage_set(
+            &self,
+            extension_id: Arc<str>,
+            key: String,
+            value: Option<String>,
+            _cx: &mut App,
+        ) -> BoxFuture<'static, anyhow::Result<()>> {
+            let mut storage = self.storage.lock();
+            match value {
+                Some(value) => storage.insert((extension_id, key), value),
+                None => storage.remove(&(extension_id, key)),
+            };
+            Box::pin(async { Ok(()) })
         }
     }
 
@@ -870,6 +1206,128 @@ mod tests {
                 r#"decorate stub/lint /project/main.rs [GutterIcon { line: 3, severity: Warning, tooltip: "careful" }]"#,
                 r#"decorate stub/lint /project/main.rs [InlayHint { position: AddonPosition { line: 1, column: 2 }, text: "hint" }]"#,
                 "clear stub/lint",
+            ]
+        );
+    }
+
+    #[gpui::test]
+    async fn test_workspace_imports(cx: &mut TestAppContext) {
+        let proxy = Arc::new(ExtensionHostProxy::new());
+        let recorder = RecordingAddonProxy::default();
+        proxy.register_addon_proxy(recorder.clone());
+        let host = test_host(cx, proxy);
+        let fs = host.fs.as_fake();
+        fs.insert_tree(
+            "/project",
+            serde_json::json!({ "a.txt": "hello", "src": { "lib.rs": "" } }),
+        )
+        .await;
+        fs.insert_tree("/secret", serde_json::json!({ "key.txt": "hunter2" }))
+            .await;
+        let mut state = test_state(&host, &test_manifest());
+
+        assert_eq!(
+            super::workspace::Host::workspace_folders(&mut state)
+                .await
+                .unwrap(),
+            ["/project"]
+        );
+        assert_eq!(
+            super::workspace::Host::read_file(&mut state, "/project/a.txt".into())
+                .await
+                .unwrap(),
+            Ok("hello".to_string())
+        );
+        assert_eq!(
+            super::workspace::Host::read_dir(&mut state, "/project".into())
+                .await
+                .unwrap(),
+            Ok(vec!["a.txt".to_string(), "src/".to_string()])
+        );
+        // Files outside the workspace folders stay out of reach, also through `..`.
+        for path in [
+            "/secret/key.txt",
+            "/project/../secret/key.txt",
+            "relative.txt",
+        ] {
+            assert!(
+                super::workspace::Host::read_file(&mut state, path.into())
+                    .await
+                    .unwrap()
+                    .is_err(),
+                "{path} should not be readable"
+            );
+        }
+        assert!(
+            super::workspace::Host::watch_path(&mut state, "/secret".into())
+                .await
+                .unwrap()
+                .is_err()
+        );
+        assert_eq!(
+            super::workspace::Host::watch_path(&mut state, "/project/src".into())
+                .await
+                .unwrap(),
+            Ok(7)
+        );
+        super::workspace::Host::unwatch_path(&mut state, 7)
+            .await
+            .unwrap();
+
+        let item = |id: &str| super::workspace::QuickPickItem {
+            id: id.into(),
+            label: id.into(),
+            description: None,
+        };
+        assert_eq!(
+            super::workspace::Host::quick_pick(&mut state, vec![item("a"), item("b")], None)
+                .await
+                .unwrap(),
+            Some("b".to_string())
+        );
+        assert_eq!(
+            super::workspace::Host::input_box(&mut state, "Name?".into(), Some("Vireo".into()))
+                .await
+                .unwrap(),
+            Some("Vireo".to_string())
+        );
+        super::workspace::Host::show_notification(
+            &mut state,
+            super::workspace::NotificationLevel::Warning,
+            "careful".into(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            super::workspace::Host::get_addon_settings(&mut state)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some(r#"{"greeting":"hi"}"#)
+        );
+        super::workspace::Host::storage_set(&mut state, "count".into(), Some("2".into()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            super::workspace::Host::storage_get(&mut state, "count".into())
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("2")
+        );
+        super::editor::Host::open_file(&mut state, "/project/a.txt".into(), None)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            recorder.calls.lock().as_slice(),
+            [
+                "watch stub /project/src",
+                "unwatch stub 7",
+                "notify stub Warning careful",
+                "open-file /project/a.txt",
             ]
         );
     }

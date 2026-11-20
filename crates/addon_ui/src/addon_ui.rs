@@ -4,11 +4,14 @@
 
 mod decorations;
 mod panel;
+mod prompt;
+mod services;
 mod status_bar;
 mod view;
 
 pub use decorations::{CollectionKey, Decorations};
 pub use panel::{AddonPanel, PANEL_SLOTS, TogglePanel};
+pub use services::AddonSettings;
 pub use status_bar::AddonStatusItems;
 pub use view::{AddonView, AddonViewItem};
 
@@ -21,10 +24,11 @@ use command_palette_hooks::{
     CommandPaletteExtraCommand, CommandPaletteFilter, GlobalCommandPaletteExtraCommands,
 };
 use extension::{
-    AddonContextMenuEntry, AddonDecoration, AddonPanelManifestEntry, AddonStatusItem,
-    AddonTreeItem, AddonViewEvent, AddonViewTree, Extension, ExtensionAddonProxy,
-    ExtensionHostProxy,
+    AddonActiveEditor, AddonContextMenuEntry, AddonDecoration, AddonNotificationLevel,
+    AddonPanelManifestEntry, AddonPosition, AddonQuickPickItem, AddonStatusItem, AddonTreeItem,
+    AddonViewEvent, AddonViewTree, Extension, ExtensionAddonProxy, ExtensionHostProxy,
 };
+use futures::future::BoxFuture;
 use gpui::{
     Action, App, AppContext as _, BorrowAppContext as _, Context, Entity, EventEmitter, Global,
     SharedString, Task,
@@ -99,6 +103,9 @@ pub struct AddonRegistry {
     status_items: BTreeMap<Arc<str>, Vec<AddonStatusItem>>,
     /// The addon panel shown by each `AddonPanel<SLOT>` type.
     panel_slots: [Option<AddonViewKey>; PANEL_SLOTS],
+    /// File watches by watch ID, with the addon that started them.
+    watches: BTreeMap<u64, (Arc<str>, Task<()>)>,
+    next_watch_id: u64,
 }
 
 /// Identifies a view: an addon and the view ID it chose. A panel's view ID is
@@ -174,6 +181,8 @@ impl AddonRegistry {
     pub fn unregister(&mut self, extension_id: &str, cx: &mut Context<Self>) {
         let removed_addon = self.addons.remove(extension_id).is_some();
         let removed_items = self.status_items.remove(extension_id).is_some();
+        self.watches
+            .retain(|_, (watch_extension_id, _)| watch_extension_id.as_ref() != extension_id);
         if removed_addon || removed_items {
             self.assign_panel_slots();
             cx.notify();
@@ -342,6 +351,26 @@ impl AddonRegistry {
         })
     }
 
+    pub(crate) fn next_watch_id(&mut self) -> u64 {
+        self.next_watch_id += 1;
+        self.next_watch_id
+    }
+
+    pub(crate) fn add_watch(&mut self, extension_id: Arc<str>, watch_id: u64, task: Task<()>) {
+        self.watches.insert(watch_id, (extension_id, task));
+    }
+
+    /// Stops a watch, if the addon started it.
+    pub(crate) fn remove_watch(&mut self, extension_id: &str, watch_id: u64) {
+        if self
+            .watches
+            .get(&watch_id)
+            .is_some_and(|(watch_extension_id, _)| watch_extension_id.as_ref() == extension_id)
+        {
+            self.watches.remove(&watch_id);
+        }
+    }
+
     /// Every addon's status bar items, ordered by addon ID.
     pub fn status_items(&self) -> Vec<(Arc<str>, AddonStatusItem)> {
         self.status_items
@@ -495,6 +524,81 @@ impl ExtensionAddonProxy for AddonProxy {
         };
         let paths = cx.update_global(|all: &mut Decorations, _| all.clear(&key));
         decorations::refresh(Some(&paths), cx);
+    }
+
+    fn active_editor(&self, cx: &mut App) -> Option<AddonActiveEditor> {
+        services::active_editor(cx)
+    }
+
+    fn active_editor_text(&self, cx: &mut App) -> Option<String> {
+        services::active_editor_text(cx)
+    }
+
+    fn open_file(
+        &self,
+        path: PathBuf,
+        position: Option<AddonPosition>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Result<()>> {
+        services::open_file(path, position, cx)
+    }
+
+    fn show_notification(
+        &self,
+        extension_id: Arc<str>,
+        level: AddonNotificationLevel,
+        message: String,
+        cx: &mut App,
+    ) {
+        services::show_notification(extension_id, level, message, cx)
+    }
+
+    fn quick_pick(
+        &self,
+        items: Vec<AddonQuickPickItem>,
+        placeholder: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Option<String>> {
+        services::quick_pick(items, placeholder, cx)
+    }
+
+    fn input_box(
+        &self,
+        prompt: String,
+        value: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Option<String>> {
+        services::input_box(prompt, value, cx)
+    }
+
+    fn workspace_folders(&self, cx: &mut App) -> Vec<PathBuf> {
+        services::workspace_folders(cx)
+    }
+
+    fn watch_path(&self, extension_id: Arc<str>, path: PathBuf, cx: &mut App) -> u64 {
+        services::watch_path(extension_id, path, cx)
+    }
+
+    fn unwatch_path(&self, extension_id: Arc<str>, watch_id: u64, cx: &mut App) {
+        services::unwatch_path(extension_id, watch_id, cx)
+    }
+
+    fn addon_settings(&self, extension_id: Arc<str>, cx: &mut App) -> Option<String> {
+        services::addon_settings(&extension_id, cx)
+    }
+
+    fn storage_get(&self, extension_id: Arc<str>, key: String, cx: &mut App) -> Option<String> {
+        services::storage_get(&extension_id, &key, cx)
+    }
+
+    fn storage_set(
+        &self,
+        extension_id: Arc<str>,
+        key: String,
+        value: Option<String>,
+        cx: &mut App,
+    ) -> BoxFuture<'static, Result<()>> {
+        services::storage_set(&extension_id, key, value, cx)
     }
 
     fn open_view_tab(

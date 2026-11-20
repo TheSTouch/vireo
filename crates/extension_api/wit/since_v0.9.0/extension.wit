@@ -10,6 +10,7 @@ world extension {
     import nodejs;
     import ui;
     import editor;
+    import workspace;
     use ui.{tree-item, view-event, view-tree};
 
     use common.{env-vars, range};
@@ -200,4 +201,7 @@ world extension {
 
     /// Tells the addon that an element of a custom view was used.
     export handle-view-event: func(view-id: string, element-id: string, event: view-event) -> result<_, string>;
+
+    /// Reports changes to a path watched with `workspace.watch-path`.
+    export files-changed: func(watch-id: u64, paths: list<string>);
 }

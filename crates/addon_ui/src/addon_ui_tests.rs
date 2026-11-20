@@ -5,7 +5,10 @@ use anyhow::{Result, bail};
 use async_trait::async_trait;
 use collections::HashMap;
 use editor::{Editor, HighlightKey};
-use extension::{AddonDecoration, AddonPosition, AddonSeverity, AddonTextRange};
+use extension::{
+    AddonDecoration, AddonNotificationLevel, AddonPosition, AddonQuickPickItem, AddonSeverity,
+    AddonTextRange,
+};
 use extension::{AddonElement, AddonElementKind, AddonTreeItem, AddonViewEvent, AddonViewTree};
 use extension::{
     AddonStatusItem, BuildTaskTemplate, CodeLabel, Command, Completion, ContextServerConfiguration,
@@ -19,11 +22,12 @@ use language::LanguageName;
 use lsp::LanguageServerName;
 use parking_lot::Mutex;
 use project::Project;
+use settings::SettingsStore;
 use task::{SpawnInTerminal, ZedDebugConfig};
 use util::path;
 use workspace::Item as _;
 use workspace::dock::{DockPosition, Panel as _};
-use workspace::{AppState, MultiWorkspace};
+use workspace::{AppState, MultiWorkspace, Workspace};
 
 use crate::*;
 
@@ -34,6 +38,7 @@ pub(crate) struct FakeAddon {
     pub commands_run: Mutex<Vec<(Arc<str>, Vec<String>)>>,
     pub tree_children: Mutex<HashMap<Option<String>, Vec<AddonTreeItem>>>,
     pub view_events: Mutex<Vec<(String, AddonViewEvent)>>,
+    pub files_changed: Mutex<Vec<(u64, Vec<String>)>>,
 }
 
 impl FakeAddon {
@@ -43,6 +48,7 @@ impl FakeAddon {
             commands_run: Mutex::default(),
             tree_children: Mutex::default(),
             view_events: Mutex::default(),
+            files_changed: Mutex::default(),
         })
     }
 
@@ -111,6 +117,11 @@ impl Extension for FakeAddon {
                 element("cycle", AddonElementKind::Row, vec![0]),
             ],
         })
+    }
+
+    async fn addon_files_changed(&self, watch_id: u64, paths: Vec<String>) -> Result<()> {
+        self.files_changed.lock().push((watch_id, paths));
+        Ok(())
     }
 
     async fn addon_handle_view_event(
@@ -817,4 +828,207 @@ async fn test_decorations_reach_editors_showing_the_file(cx: &mut TestAppContext
     cx.update(|_, cx| proxy.unregister_addon("other-addon".into(), cx));
     cx.run_until_parked();
     assert!(hovers_at(&editor, 0, 4, cx).is_empty());
+}
+
+async fn workspace_with_project(
+    cx: &mut TestAppContext,
+) -> (
+    Arc<ExtensionHostProxy>,
+    Entity<Workspace>,
+    Arc<dyn fs::Fs>,
+    &mut VisualTestContext,
+) {
+    let (app_state, proxy) = init_test(cx);
+    app_state
+        .fs
+        .as_fake()
+        .insert_tree(
+            path!("/project"),
+            serde_json::json!({ "main.rs": "fn main() {\n    let x = 1;\n}\n", "src": {} }),
+        )
+        .await;
+    let project = Project::test(app_state.fs.clone(), [path!("/project").as_ref()], cx).await;
+    let (multi_workspace, cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = multi_workspace.read_with(cx, |mw, _| mw.workspace().clone());
+    (proxy, workspace, app_state.fs.clone(), cx)
+}
+
+#[gpui::test]
+async fn test_quick_pick_and_input_box(cx: &mut TestAppContext) {
+    let (proxy, workspace, _fs, cx) = workspace_with_project(cx).await;
+    let item = |id: &str| AddonQuickPickItem {
+        id: id.to_lowercase(),
+        label: id.into(),
+        description: None,
+    };
+
+    // Typing filters the items; confirming answers with the picked item's ID.
+    let picked = cx.cx.update(|cx| {
+        proxy.quick_pick(
+            vec![item("Hello"), item("Bonjour"), item("Hola")],
+            Some("Pick a greeting".into()),
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    assert!(workspace.read_with(cx, |workspace, cx| {
+        workspace.active_modal::<prompt::AddonPrompt>(cx).is_some()
+    }));
+    cx.simulate_input("bon");
+    cx.run_until_parked();
+    cx.dispatch_action(menu::Confirm);
+    assert_eq!(picked.await, Some("bonjour".to_string()));
+
+    // An input box starts from the given value.
+    let typed = cx
+        .cx
+        .update(|cx| proxy.input_box("Who?".into(), Some("world".into()), cx));
+    cx.run_until_parked();
+    cx.dispatch_action(menu::Confirm);
+    assert_eq!(typed.await, Some("world".to_string()));
+
+    // Dismissing answers with nothing.
+    let dismissed = cx.cx.update(|cx| proxy.input_box("Who?".into(), None, cx));
+    cx.run_until_parked();
+    cx.dispatch_action(menu::Cancel);
+    assert_eq!(dismissed.await, None);
+}
+
+#[gpui::test]
+async fn test_editor_and_workspace_services(cx: &mut TestAppContext) {
+    let (proxy, workspace, _fs, cx) = workspace_with_project(cx).await;
+    let main_rs = PathBuf::from(path!("/project/main.rs"));
+
+    assert_eq!(
+        cx.cx.update(|cx| proxy.workspace_folders(cx)),
+        [PathBuf::from(path!("/project"))]
+    );
+    assert_eq!(cx.cx.update(|cx| proxy.active_editor(cx)), None);
+
+    // Opening a file moves the cursor to the position, and the file becomes
+    // the active editor.
+    let opened = cx.cx.update(|cx| {
+        proxy.open_file(
+            main_rs.clone(),
+            Some(AddonPosition { line: 1, column: 8 }),
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    opened.await.expect("main.rs opens");
+    let active = cx
+        .cx
+        .update(|cx| proxy.active_editor(cx))
+        .expect("an editor is active");
+    assert_eq!(active.path.as_deref(), Some(main_rs.as_path()));
+    assert_eq!(active.selection, range((1, 8), (1, 8)));
+    assert_eq!(active.selected_text, "");
+    assert_eq!(
+        cx.cx.update(|cx| proxy.active_editor_text(cx)).as_deref(),
+        Some("fn main() {\n    let x = 1;\n}\n")
+    );
+
+    // Notifications show in the workspace.
+    cx.cx.update(|cx| {
+        proxy.show_notification(
+            "hello-ui".into(),
+            AddonNotificationLevel::Warning,
+            "careful".into(),
+            cx,
+        )
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        workspace.read_with(cx, |workspace, _| workspace.notification_ids().len()),
+        1
+    );
+
+    // Each addon reads its own entry of the `addons` settings.
+    cx.cx.update(|cx| {
+        cx.update_global::<SettingsStore, _>(|store, cx| {
+            store.update_user_settings(cx, |settings| {
+                settings.addons = Some(
+                    [(
+                        "hello-ui".to_string(),
+                        serde_json::json!({ "greeting": "hi" }),
+                    )]
+                    .into_iter()
+                    .collect(),
+                );
+            });
+        });
+    });
+    assert_eq!(
+        cx.cx
+            .update(|cx| proxy.addon_settings("hello-ui".into(), cx))
+            .as_deref(),
+        Some(r#"{"greeting":"hi"}"#)
+    );
+    assert_eq!(
+        cx.cx.update(|cx| proxy.addon_settings("other".into(), cx)),
+        None
+    );
+
+    // Storage persists values per addon.
+    let stored = cx
+        .cx
+        .update(|cx| proxy.storage_set("hello-ui".into(), "count".into(), Some("3".into()), cx));
+    stored.await.expect("the value is stored");
+    assert_eq!(
+        cx.cx
+            .update(|cx| proxy.storage_get("hello-ui".into(), "count".into(), cx))
+            .as_deref(),
+        Some("3")
+    );
+    assert_eq!(
+        cx.cx
+            .update(|cx| proxy.storage_get("other".into(), "count".into(), cx)),
+        None
+    );
+    let removed = cx
+        .cx
+        .update(|cx| proxy.storage_set("hello-ui".into(), "count".into(), None, cx));
+    removed.await.expect("the value is removed");
+    assert_eq!(
+        cx.cx
+            .update(|cx| proxy.storage_get("hello-ui".into(), "count".into(), cx)),
+        None
+    );
+}
+
+#[gpui::test]
+async fn test_file_watches_report_changes(cx: &mut TestAppContext) {
+    let (proxy, _workspace, fs, cx) = workspace_with_project(cx).await;
+    let addon = FakeAddon::new(HELLO_MANIFEST);
+    cx.cx.update(|cx| proxy.register_addon(addon.clone(), cx));
+
+    let watch_id = cx
+        .cx
+        .update(|cx| proxy.watch_path("hello-ui".into(), PathBuf::from(path!("/project/src")), cx));
+    cx.run_until_parked();
+    fs.as_fake()
+        .insert_file(path!("/project/src/new.rs"), b"// new".to_vec())
+        .await;
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    let changes = addon.files_changed.lock().clone();
+    assert!(
+        changes.iter().any(|(id, paths)| *id == watch_id
+            && paths.iter().any(|path| path.ends_with("new.rs"))),
+        "changes: {changes:?}"
+    );
+
+    // After unwatching, changes are no longer reported.
+    cx.cx
+        .update(|cx| proxy.unwatch_path("hello-ui".into(), watch_id, cx));
+    addon.files_changed.lock().clear();
+    fs.as_fake()
+        .insert_file(path!("/project/src/other.rs"), b"// other".to_vec())
+        .await;
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(1));
+    cx.run_until_parked();
+    assert!(addon.files_changed.lock().is_empty());
 }

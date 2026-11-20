@@ -210,6 +210,7 @@ impl VsCodeSettings {
                 ..GlobalLspSettingsContent::default()
             }),
             helix_mode: None,
+            addons: None,
             hide_mouse: None,
             image_viewer: None,
             markdown_preview: None,
