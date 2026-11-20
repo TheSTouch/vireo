@@ -1790,4 +1790,42 @@
       "enter": "claude_code::DenyPermission",
     },
   },
+  // Claude Code panel: shortcuts of the VS Code extension.
+  {
+    "context": "Editor && mode == full",
+    "bindings": {
+      "alt-k": "claude_code::InsertAtMention",
+      "ctrl-escape": "claude_code::FocusInput",
+      "ctrl-alt-k": "claude_code::InsertAtMentioned",
+    },
+  },
+  {
+    "context": "Workspace",
+    "bindings": {
+      "ctrl-shift-escape": "claude_code::OpenInNewTab",
+      "ctrl-shift-t": "claude_code::ReopenClosedSession",
+    },
+  },
+  {
+    "context": "ClaudeCode",
+    "bindings": {
+      "ctrl-escape": "claude_code::BlurInput",
+      "ctrl-alt-f": "claude_code::ToggleFocusView",
+      "ctrl-d": "claude_code::ToggleDictation",
+    },
+  },
+  {
+    "context": "ClaudeCodeInput > Editor",
+    "bindings": {
+      "ctrl-escape": "claude_code::BlurInput",
+      "ctrl-alt-f": "claude_code::ToggleFocusView",
+      "ctrl-d": "claude_code::ToggleDictation",
+    },
+  },
+  {
+    "context": "ClaudeCode && new_conversation_shortcut",
+    "bindings": {
+      "ctrl-n": "claude_code::NewConversation",
+    },
+  },
 ]

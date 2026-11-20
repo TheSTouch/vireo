@@ -63,16 +63,16 @@ Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the 
 
 | Keys (macOS / Linux, Windows) | Command | When | Vireo | Item | Status |
 | --- | --- | --- | --- | --- | --- |
-| `alt-k` / `alt-k` | Insert @-mention | Editor focused | `claude_code::InsertAtMention` in `Editor` context | B-7 | Todo |
-| `cmd-escape` / `ctrl-escape` | Focus input | Editor focused, not terminal mode | `claude_code::FocusInput` in `Editor` context | B-7 | Todo |
-| `cmd-escape` / `ctrl-escape` | Blur input | Claude input focused | `claude_code::BlurInput` in `ClaudeCode` context | B-7 | Todo |
-| `cmd-escape` / `ctrl-escape` | Open in Terminal | `useTerminal` is on | Same key; `FocusInput` opens the terminal when `use_terminal` is on | B-7 | Todo |
-| `cmd-shift-escape` / `ctrl-shift-escape` | Open in New Tab | Not terminal mode | `claude_code::OpenInNewTab` | B-7 | Todo |
-| `cmd-alt-k` / `ctrl-alt-k` | Insert At-Mentioned (terminal mode) | Editor focused | `claude_code::InsertAtMentioned` | B-7 | Todo |
-| `cmd-n` / `ctrl-n` | New Conversation | `enableNewConversationShortcut` and Claude focused | `claude_code::NewConversation` in `ClaudeCode` context; the action falls through when the setting is off | B-7 | Todo |
-| `ctrl-alt-f` | Toggle Focus view | Claude focused | `claude_code::ToggleFocusView` in `ClaudeCode` context | B-7 | Todo |
-| `cmd-shift-t` / `ctrl-shift-t` | Reopen Closed Session | `enableReopenClosedSessionShortcut` and a Claude tab was closed last | `claude_code::ReopenClosedSession` in `ClaudeCode` context | B-7 | Todo |
-| `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` | B-8 | Todo |
+| `alt-k` / `alt-k` | Insert @-mention | Editor focused | `claude_code::InsertAtMention` in `Editor` context | B-7 | Done |
+| `cmd-escape` / `ctrl-escape` | Focus input | Editor focused, not terminal mode | `claude_code::FocusInput` in `Editor` context | B-7 | Done |
+| `cmd-escape` / `ctrl-escape` | Blur input | Claude input focused | `claude_code::BlurInput` in `ClaudeCode` context | B-7 | Done |
+| `cmd-escape` / `ctrl-escape` | Open in Terminal | `useTerminal` is on | Same key; `FocusInput` opens the terminal when `use_terminal` is on | B-7 | Done |
+| `cmd-shift-escape` / `ctrl-shift-escape` | Open in New Tab | Not terminal mode | `claude_code::OpenInNewTab` | B-7 | Done |
+| `cmd-alt-k` / `ctrl-alt-k` | Insert At-Mentioned (terminal mode) | Editor focused | `claude_code::InsertAtMentioned` | B-7 | Done |
+| `cmd-n` / `ctrl-n` | New Conversation | `enableNewConversationShortcut` and Claude focused | `claude_code::NewConversation` in `ClaudeCode && new_conversation_shortcut`; with the setting off the key stays New File | B-7 | Done |
+| `ctrl-alt-f` | Toggle Focus view | Claude focused | `claude_code::ToggleFocusView` in `ClaudeCode` context | B-7 | Done |
+| `cmd-shift-t` / `ctrl-shift-t` | Reopen Closed Session | `enableReopenClosedSessionShortcut` and a Claude tab was closed last | `claude_code::ReopenClosedSession` in `Workspace`, replacing `pane::ReopenClosedItem`, which it falls back to | B-7 | Done |
+| `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` in `ClaudeCode` and the Claude input | B-7, B-8 | Done: the key; dictation itself is B-8 |
 | `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4 | Done |
 | `escape` | Stop the running turn | Claude focused while running | `claude_code::Interrupt` | B-4 | Done |
 
@@ -95,8 +95,8 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | `useCtrlEnterToSend` | bool, `false` | Cmd/Ctrl+Enter sends, Enter inserts a newline. | `use_ctrl_enter_to_send` | B-4 | Done |
 | `preferredLocation` | `sidebar` or `panel`, `panel` | Where Claude opens; updated when the user opens it elsewhere. | `preferred_location` | B-4 | Partial: `Open` and the focus key follow it (`panel` = an editor tab, `sidebar` = the right dock); it is not yet updated when Claude is opened elsewhere |
 | `lockEditorGroups` | bool, `true` | Lock the editor group of a Claude tab. | `lock_editor_groups` | B-4 | Todo: read but not applied; Vireo has no locked panes yet |
-| `enableNewConversationShortcut` | bool, `false` | Enables Cmd/Ctrl+N for a new conversation. | `enable_new_conversation_shortcut` | B-7 | Todo |
-| `enableReopenClosedSessionShortcut` | bool, `true` | Enables Cmd/Ctrl+Shift+T for the last closed session. | `enable_reopen_closed_session_shortcut` | B-7 | Todo |
+| `enableNewConversationShortcut` | bool, `false` | Enables Cmd/Ctrl+N for a new conversation. | `enable_new_conversation_shortcut` | B-7 | Done |
+| `enableReopenClosedSessionShortcut` | bool, `true` | Enables Cmd/Ctrl+Shift+T for the last closed session. | `enable_reopen_closed_session_shortcut` | B-7 | Done |
 | `hideOnboarding` | bool, `false` | Hide the onboarding checklist. | `hide_onboarding` | B-8 | Todo |
 | `attachOpenFile` | bool, `true` | Attach the open file to messages and show it as a chip. | `attach_open_file` | B-4 | Done |
 | `attachSelection` | bool, `true` | Attach the editor selection to messages and show it as a chip. | `attach_selection` | B-4 | Done |

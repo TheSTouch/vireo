@@ -1933,9 +1933,14 @@ impl Render for ClaudeCodeView {
         let entries = self.render_entries(window, cx);
         let empty = entries.is_empty();
         let colors = cx.theme().colors();
+        let mut key_context = KeyContext::default();
+        key_context.add("ClaudeCode");
+        if ClaudeCodeSettings::get_global(cx).enable_new_conversation_shortcut {
+            key_context.add("new_conversation_shortcut");
+        }
         v_flex()
             .size_full()
-            .key_context("ClaudeCode")
+            .key_context(key_context)
             .track_focus(&self.focus_handle)
             .bg(colors.panel_background)
             .on_action(cx.listener(Self::send))
