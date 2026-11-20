@@ -6,7 +6,13 @@ use smallvec::SmallVec;
 use crate::prelude::*;
 
 const START_TAB_SLOT_SIZE: Pixels = px(12.);
-const END_TAB_SLOT_SIZE: Pixels = px(14.);
+/// VS Code's close button sits in a 20 px square at the tab's end.
+const END_TAB_SLOT_SIZE: Pixels = px(20.);
+/// VS Code's tabs are 35 px tall whatever the UI font size.
+const VS_CODE_TAB_HEIGHT: f32 = 35.;
+/// VS Code pads a tab's label 10 px from its start.
+const TAB_START_PADDING: Pixels = px(10.);
+const TAB_END_PADDING: Pixels = px(4.);
 
 /// The position of a [`Tab`] within a list of tabs.
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -77,11 +83,15 @@ impl Tab {
     }
 
     pub fn content_height(cx: &App) -> Pixels {
-        DynamicSpacing::Base32.px(cx) - px(1.)
+        Self::container_height(cx) - px(1.)
     }
 
+    /// VS Code's 35 px, scaled only by the UI density setting: Zed's
+    /// spacing also grows with the UI font size, VS Code's tabs don't.
     pub fn container_height(cx: &App) -> Pixels {
-        DynamicSpacing::Base32.px(cx)
+        // Base32 is 2 rems at the default density.
+        let density = DynamicSpacing::Base32.rems(cx).0 / 2.;
+        px((VS_CODE_TAB_HEIGHT * density).round())
     }
 }
 
@@ -109,31 +119,32 @@ impl ParentElement for Tab {
 impl RenderOnce for Tab {
     #[allow(refining_impl_trait)]
     fn render(self, _: &mut Window, cx: &mut App) -> Stateful<Div> {
-        let (text_color, tab_bg, _tab_hover_bg, _tab_active_bg) = match self.selected {
+        let colors = cx.theme().colors();
+        let (text_color, tab_bg) = match self.selected {
             false => (
-                cx.theme().colors().text_muted,
-                cx.theme().colors().tab_inactive_background,
-                cx.theme().colors().ghost_element_hover,
-                cx.theme().colors().ghost_element_active,
+                colors.tab_inactive_foreground,
+                colors.tab_inactive_background,
             ),
-            true => (
-                cx.theme().colors().text,
-                cx.theme().colors().tab_active_background,
-                cx.theme().colors().element_hover,
-                cx.theme().colors().element_active,
-            ),
+            true => (colors.tab_active_foreground, colors.tab_active_background),
         };
+        let active_border = colors.tab_active_border;
 
+        // An empty start slot takes no room, so the label starts 10 px in as in
+        // VS Code; the end slot always keeps room for the close button.
         let (start_slot, end_slot) = {
-            let start_slot = h_flex()
-                .size(START_TAB_SLOT_SIZE)
-                .justify_center()
-                .children(self.start_slot);
+            let start_slot = self.start_slot.map(|start_slot| {
+                h_flex()
+                    .size(START_TAB_SLOT_SIZE)
+                    .justify_center()
+                    .child(start_slot)
+            });
 
-            let end_slot = h_flex()
-                .size(END_TAB_SLOT_SIZE)
-                .justify_center()
-                .children(self.end_slot);
+            let end_slot = Some(
+                h_flex()
+                    .size(END_TAB_SLOT_SIZE)
+                    .justify_center()
+                    .children(self.end_slot),
+            );
 
             match self.close_side {
                 TabCloseSide::End => (start_slot, end_slot),
@@ -141,41 +152,50 @@ impl RenderOnce for Tab {
             }
         };
 
+        // VS Code: every tab has a border on its trailing side; inactive tabs
+        // also draw the tab bar's bottom border, which the active tab covers.
+        // The active tab carries a 1 px accent line along its top.
         self.div
+            .relative()
             .h(Tab::container_height(cx))
             .bg(tab_bg)
-            .border_color(cx.theme().colors().border)
-            .map(|this| match self.position {
-                TabPosition::First => {
-                    if self.selected {
-                        this.pl_px().border_r_1().pb_px()
-                    } else {
-                        this.pl_px().pr_px().border_b_1()
-                    }
+            .border_color(colors.border)
+            .border_r_1()
+            .map(|this| {
+                if self.selected {
+                    this.pb_px()
+                } else {
+                    this.border_b_1()
                 }
-                TabPosition::Last => {
-                    if self.selected {
-                        this.border_l_1().border_r_1().pb_px()
-                    } else {
-                        this.pl_px().border_b_1().border_r_1()
-                    }
-                }
-                TabPosition::Middle(Ordering::Equal) => this.border_l_1().border_r_1().pb_px(),
-                TabPosition::Middle(Ordering::Less) => this.border_l_1().pr_px().border_b_1(),
-                TabPosition::Middle(Ordering::Greater) => this.border_r_1().pl_px().border_b_1(),
             })
+            .when(
+                self.selected && matches!(self.position, TabPosition::First),
+                |this| this.pl_px(),
+            )
             .cursor_pointer()
+            .when(self.selected, |this| {
+                this.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .h_px()
+                        .bg(active_border),
+                )
+            })
             .child(
                 h_flex()
                     .group("")
                     .relative()
                     .h(Tab::content_height(cx))
-                    .px(DynamicSpacing::Base04.px(cx))
+                    .pl(TAB_START_PADDING)
+                    .pr(TAB_END_PADDING)
                     .gap(DynamicSpacing::Base04.rems(cx))
                     .text_color(text_color)
-                    .child(start_slot)
+                    .children(start_slot)
                     .children(self.children)
-                    .child(end_slot),
+                    .children(end_slot),
             )
     }
 }

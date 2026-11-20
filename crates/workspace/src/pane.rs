@@ -3056,6 +3056,11 @@ impl Pane {
                     end_slot_tooltip_text = "Close Tab";
                     match show_close_button {
                         ShowCloseButton::Always => IconButton::new("close tab", IconName::Close),
+                        // As in VS Code, the active tab always shows its close
+                        // button; the others show it on hover.
+                        ShowCloseButton::Hover if is_active => {
+                            IconButton::new("close tab", IconName::Close)
+                        }
                         ShowCloseButton::Hover => {
                             IconButton::new("close tab", IconName::Close).visible_on_hover("")
                         }
@@ -8823,6 +8828,28 @@ mod tests {
             assert!(!b.read(cx).is_dirty);
             assert!(!c.read(cx).is_dirty);
         });
+    }
+
+    #[gpui::test]
+    async fn test_tabs_are_vs_code_sized(cx: &mut TestAppContext) {
+        init_test(cx);
+        let fs = FakeFs::new(cx.executor());
+        let project = Project::test(fs, None, cx).await;
+        let (workspace, cx) =
+            cx.add_window_view(|window, cx| Workspace::test_new(project, window, cx));
+        let pane = workspace.read_with(cx, |workspace, _| workspace.active_pane().clone());
+        cx.simulate_resize(size(px(800.), px(600.)));
+
+        add_labeled_item(&pane, "main.rs", false, cx);
+        add_labeled_item(&pane, "lib.rs", false, cx);
+        cx.run_until_parked();
+
+        // VS Code's tabs are 35 px tall at the default density.
+        let inactive = cx.debug_bounds("TAB-0").unwrap();
+        let active = cx.debug_bounds("TAB-1").unwrap();
+        assert_eq!(inactive.size.height, px(35.));
+        assert_eq!(active.size.height, px(35.));
+        assert_eq!(inactive.top(), active.top());
     }
 
     #[gpui::test]

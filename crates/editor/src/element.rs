@@ -7128,6 +7128,20 @@ pub fn render_breadcrumb_text(
 
     let element = h_flex().flex_grow_1().text_ui(cx);
 
+    // VS Code shows the file's path one folder per crumb, in the UI font,
+    // with the file's icon before its name.
+    let file_name = active_item
+        .project_path(cx)
+        .and_then(|project_path| project_path.path.file_name().map(|name| name.to_string()));
+    let path_segment_count;
+    (segments, path_segment_count) = split_breadcrumb_path(segments, file_name.as_deref());
+    let file_icon = file_name
+        .as_deref()
+        .filter(|_| {
+            path_segment_count > 0 && workspace::item::ItemSettings::get_global(cx).file_icons
+        })
+        .and_then(|name| file_icons::FileIcons::get_icon(std::path::Path::new(name), cx));
+
     let prefix_end_ix = cmp::min(segments.len(), MAX_SEGMENTS / 2);
     let suffix_start_ix = cmp::max(
         prefix_end_ix,
@@ -7144,9 +7158,11 @@ pub fn render_breadcrumb_text(
         );
     }
 
+    let file_name_index = path_segment_count.checked_sub(1);
     let highlighted_segments = segments.into_iter().enumerate().map(|(index, segment)| {
         let mut text_style = window.text_style();
-        if let Some(font) = &breadcrumb_font {
+        let is_path_segment = index < path_segment_count;
+        if let Some(font) = breadcrumb_font.as_ref().filter(|_| !is_path_segment) {
             text_style.font_family = font.family.clone();
             text_style.font_features = font.features.clone();
             text_style.font_style = font.style;
@@ -7154,7 +7170,7 @@ pub fn render_breadcrumb_text(
         }
         text_style.color = Color::Muted.color(cx);
 
-        if index == 0
+        if Some(index) == file_name_index.or(Some(0))
             && !workspace::TabBarSettings::get_global(cx).show
             && active_item.is_dirty(cx)
             && let Some(styled_element) = apply_dirty_filename_style(&segment, &text_style, cx)
@@ -7162,13 +7178,23 @@ pub fn render_breadcrumb_text(
             return styled_element;
         }
 
-        StyledText::new(segment.text.replace('\n', " "))
-            .with_default_highlights(&text_style, segment.highlights)
-            .into_any()
+        let text = StyledText::new(segment.text.replace('\n', " "))
+            .with_default_highlights(&text_style, segment.highlights);
+        match file_icon.clone().filter(|_| Some(index) == file_name_index) {
+            Some(icon) => h_flex()
+                .gap_1()
+                .child(Icon::from_path(icon).size(IconSize::Small))
+                .child(text)
+                .into_any_element(),
+            None => text.into_any(),
+        }
     });
 
     let breadcrumbs = Itertools::intersperse_with(highlighted_segments, || {
-        Label::new("›").color(Color::Placeholder).into_any_element()
+        Icon::new(IconName::ChevronRight)
+            .size(IconSize::XSmall)
+            .color(Color::Placeholder)
+            .into_any_element()
     });
 
     let breadcrumbs_stack = h_flex()
@@ -7270,6 +7296,43 @@ pub fn render_breadcrumb_text(
             .child(breadcrumbs)
             .into_any_element(),
     }
+}
+
+/// Splits a breadcrumb's leading file path ("crates/editor/src/element.rs")
+/// into one segment per folder and one for the file, as VS Code shows it.
+/// Returns the segments and how many of them came from the path; the path
+/// is left alone unless its last component is `file_name`.
+fn split_breadcrumb_path(
+    mut segments: Vec<HighlightedText>,
+    file_name: Option<&str>,
+) -> (Vec<HighlightedText>, usize) {
+    let Some(file_name) = file_name else {
+        return (segments, 0);
+    };
+    let Some(first) = segments.first() else {
+        return (segments, 0);
+    };
+    let is_path = first.highlights.is_empty()
+        && first
+            .text
+            .rsplit(['/', '\\'])
+            .next()
+            .is_some_and(|last| last == file_name);
+    if !is_path {
+        return (segments, 0);
+    }
+    let path = segments.remove(0).text;
+    let components: Vec<HighlightedText> = path
+        .split(['/', '\\'])
+        .filter(|component| !component.is_empty())
+        .map(|component| HighlightedText {
+            text: SharedString::from(component.to_string()),
+            highlights: Vec::new(),
+        })
+        .collect();
+    let count = components.len();
+    segments.splice(0..0, components);
+    (segments, count)
 }
 
 fn apply_dirty_filename_style(
@@ -11446,6 +11509,43 @@ mod tests {
     use std::num::NonZeroU32;
     use text::PointUtf16;
     use util::test::sample_text;
+
+    fn crumb(text: &str) -> HighlightedText {
+        HighlightedText {
+            text: SharedString::from(text.to_string()),
+            highlights: Vec::new(),
+        }
+    }
+
+    fn crumb_texts(segments: &[HighlightedText]) -> Vec<&str> {
+        segments
+            .iter()
+            .map(|segment| segment.text.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn breadcrumb_path_splits_into_one_crumb_per_folder() {
+        let (segments, path_count) = split_breadcrumb_path(
+            vec![crumb("crates/workspace/src/dock.rs"), crumb("impl Dock")],
+            Some("dock.rs"),
+        );
+        assert_eq!(
+            crumb_texts(&segments),
+            ["crates", "workspace", "src", "dock.rs", "impl Dock"]
+        );
+        assert_eq!(path_count, 4);
+
+        // A breadcrumb header that isn't the file's path is left alone.
+        let (segments, path_count) =
+            split_breadcrumb_path(vec![crumb("Untitled")], Some("dock.rs"));
+        assert_eq!(crumb_texts(&segments), ["Untitled"]);
+        assert_eq!(path_count, 0);
+
+        let (segments, path_count) = split_breadcrumb_path(vec![crumb("fn main")], None);
+        assert_eq!(crumb_texts(&segments), ["fn main"]);
+        assert_eq!(path_count, 0);
+    }
 
     // Regression test for https://github.com/zed-industries/zed/issues/65453.
     #[gpui::test]
