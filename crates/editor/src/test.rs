@@ -26,6 +26,18 @@ fn init_logger() {
     zlog::init_test();
 }
 
+/// Zed's editor metrics: a 15 px font at the "comfortable" line height.
+/// Vireo's defaults (VS Code's 12 px at 1.5) fit more rows in a test
+/// window, so tests whose expectations count visible rows pin these.
+pub fn use_zed_buffer_metrics(cx: &mut gpui::TestAppContext) {
+    cx.update_global::<settings::SettingsStore, _>(|store, cx| {
+        store.update_user_settings(cx, |settings| {
+            settings.theme.buffer_font_size = Some(15.0.into());
+            settings.theme.buffer_line_height = Some(settings::BufferLineHeight::Comfortable);
+        });
+    });
+}
+
 pub fn test_font() -> Font {
     static TEST_FONT: LazyLock<Font> = LazyLock::new(|| {
         #[cfg(not(target_os = "windows"))]

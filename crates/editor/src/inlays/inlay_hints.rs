@@ -3127,6 +3127,7 @@ pub mod tests {
                 ..InlayHintSettingsContent::default()
             })
         });
+        crate::test::use_zed_buffer_metrics(cx);
 
         let fs = FakeFs::new(cx.background_executor.clone());
         fs.insert_tree(
@@ -5261,6 +5262,7 @@ let c = 3;"#
                 ..InlayHintSettingsContent::default()
             })
         });
+        crate::test::use_zed_buffer_metrics(cx);
 
         let fs = FakeFs::new(cx.background_executor.clone());
         let mut file_content = String::from("fn main() {\n");

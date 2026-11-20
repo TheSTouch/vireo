@@ -1712,6 +1712,7 @@ mod tests {
     #[gpui::test]
     async fn test_code_lens_resolve_only_visible(cx: &mut TestAppContext) {
         init_test(cx, |_| {});
+        crate::test::use_zed_buffer_metrics(cx);
         update_test_editor_settings(cx, &|settings| {
             settings.code_lens = Some(CodeLens::On);
         });
