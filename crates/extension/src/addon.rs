@@ -37,6 +37,17 @@ pub struct AddonCommandManifestEntry {
     pub description: Option<String>,
 }
 
+/// A status bar item that an addon shows with `set-status-item`.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct AddonStatusItem {
+    /// The item's ID, unique within the addon.
+    pub id: Arc<str>,
+    pub text: String,
+    pub tooltip: Option<String>,
+    /// The addon command run when the item is clicked.
+    pub command: Option<Arc<str>>,
+}
+
 /// Connects the extension host to Vireo's addon UI (the `addon_ui` crate).
 pub trait ExtensionAddonProxy: Send + Sync + 'static {
     /// Called when a Wasm extension has loaded. Every Wasm extension is
@@ -46,6 +57,14 @@ pub trait ExtensionAddonProxy: Send + Sync + 'static {
 
     /// Called when an extension unloads. Removes everything it contributed.
     fn unregister_addon(&self, extension_id: Arc<str>, cx: &mut App);
+
+    /// Shows a status bar item, or updates the addon's item with the same ID.
+    ///
+    /// Addons may call this from their `init`, before they are registered.
+    fn set_status_item(&self, extension_id: Arc<str>, item: AddonStatusItem, cx: &mut App);
+
+    /// Removes one of the addon's status bar items.
+    fn remove_status_item(&self, extension_id: Arc<str>, item_id: Arc<str>, cx: &mut App);
 }
 
 impl ExtensionAddonProxy for ExtensionHostProxy {
@@ -61,6 +80,20 @@ impl ExtensionAddonProxy for ExtensionHostProxy {
             return;
         };
         proxy.unregister_addon(extension_id, cx)
+    }
+
+    fn set_status_item(&self, extension_id: Arc<str>, item: AddonStatusItem, cx: &mut App) {
+        let Some(proxy) = self.addon_proxy() else {
+            return;
+        };
+        proxy.set_status_item(extension_id, item, cx)
+    }
+
+    fn remove_status_item(&self, extension_id: Arc<str>, item_id: Arc<str>, cx: &mut App) {
+        let Some(proxy) = self.addon_proxy() else {
+            return;
+        };
+        proxy.remove_status_item(extension_id, item_id, cx)
     }
 }
 

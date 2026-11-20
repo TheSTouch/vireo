@@ -2,4 +2,13 @@
 ///
 /// Everything in this interface is new in v0.9.0 and is specific to Vireo.
 interface ui {
+    /// Shows an item on the right of the status bar, or updates the addon's item
+    /// with the same ID.
+    ///
+    /// `command` is the ID of one of the addon's commands, run when the item is
+    /// clicked.
+    set-status-item: func(id: string, text: string, tooltip: option<string>, command: option<string>);
+
+    /// Removes one of the addon's status bar items.
+    remove-status-item: func(id: string);
 }

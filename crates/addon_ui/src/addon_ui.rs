@@ -2,6 +2,10 @@
 //! panels, views and editor decorations that Wasm extensions contribute
 //! through extension API v0.9.0.
 
+mod status_bar;
+
+pub use status_bar::AddonStatusItems;
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -9,7 +13,7 @@ use collections::BTreeMap;
 use command_palette_hooks::{
     CommandPaletteExtraCommand, CommandPaletteFilter, GlobalCommandPaletteExtraCommands,
 };
-use extension::{Extension, ExtensionAddonProxy, ExtensionHostProxy};
+use extension::{AddonStatusItem, Extension, ExtensionAddonProxy, ExtensionHostProxy};
 use gpui::{Action, App, AppContext as _, Context, Entity, Global, SharedString, Task};
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -42,10 +46,15 @@ pub fn init(proxy: Arc<ExtensionHostProxy>, cx: &mut App) {
         filter.hide_action_types(&[std::any::TypeId::of::<RunCommand>()]);
     });
 
-    cx.observe_new(|workspace: &mut Workspace, _, _| {
+    cx.observe_new(|workspace: &mut Workspace, window, cx| {
         workspace.register_action(|_, action: &RunCommand, _, cx| {
             run_command_in_workspace(action.clone(), cx);
         });
+        if let Some(window) = window
+            && let Some(registry) = AddonRegistry::global(cx)
+        {
+            status_bar::add_to_workspace(workspace, registry, window, cx);
+        }
     })
     .detach();
 }
@@ -58,6 +67,8 @@ impl Global for GlobalAddonRegistry {}
 #[derive(Default)]
 pub struct AddonRegistry {
     addons: BTreeMap<Arc<str>, Arc<dyn Extension>>,
+    /// Status bar items by addon, in the order the addon first set them.
+    status_items: BTreeMap<Arc<str>, Vec<AddonStatusItem>>,
 }
 
 /// An addon command, as listed in the command palette.
@@ -105,7 +116,59 @@ impl AddonRegistry {
     }
 
     pub fn unregister(&mut self, extension_id: &str, cx: &mut Context<Self>) {
-        if self.addons.remove(extension_id).is_some() {
+        let removed_addon = self.addons.remove(extension_id).is_some();
+        let removed_items = self.status_items.remove(extension_id).is_some();
+        if removed_addon || removed_items {
+            cx.notify();
+        }
+    }
+
+    /// Every addon's status bar items, ordered by addon ID.
+    pub fn status_items(&self) -> Vec<(Arc<str>, AddonStatusItem)> {
+        self.status_items
+            .iter()
+            .flat_map(|(extension_id, items)| {
+                items
+                    .iter()
+                    .map(|item| (extension_id.clone(), item.clone()))
+            })
+            .collect()
+    }
+
+    /// Shows a status bar item, or updates the addon's item with the same ID.
+    ///
+    /// Accepted for addons that are not registered yet, as addons set their
+    /// items while they initialize.
+    pub fn set_status_item(
+        &mut self,
+        extension_id: Arc<str>,
+        item: AddonStatusItem,
+        cx: &mut Context<Self>,
+    ) {
+        let items = self.status_items.entry(extension_id).or_default();
+        match items.iter_mut().find(|existing| existing.id == item.id) {
+            Some(existing) if *existing == item => return,
+            Some(existing) => *existing = item,
+            None => items.push(item),
+        }
+        cx.notify();
+    }
+
+    pub fn remove_status_item(
+        &mut self,
+        extension_id: &str,
+        item_id: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(items) = self.status_items.get_mut(extension_id) else {
+            return;
+        };
+        let count = items.len();
+        items.retain(|item| item.id.as_ref() != item_id);
+        if items.len() != count {
+            if items.is_empty() {
+                self.status_items.remove(extension_id);
+            }
             cx.notify();
         }
     }
@@ -151,6 +214,22 @@ impl ExtensionAddonProxy for AddonProxy {
     fn unregister_addon(&self, extension_id: Arc<str>, cx: &mut App) {
         if let Some(registry) = AddonRegistry::global(cx) {
             registry.update(cx, |registry, cx| registry.unregister(&extension_id, cx));
+        }
+    }
+
+    fn set_status_item(&self, extension_id: Arc<str>, item: AddonStatusItem, cx: &mut App) {
+        if let Some(registry) = AddonRegistry::global(cx) {
+            registry.update(cx, |registry, cx| {
+                registry.set_status_item(extension_id, item, cx)
+            });
+        }
+    }
+
+    fn remove_status_item(&self, extension_id: Arc<str>, item_id: Arc<str>, cx: &mut App) {
+        if let Some(registry) = AddonRegistry::global(cx) {
+            registry.update(cx, |registry, cx| {
+                registry.remove_status_item(&extension_id, &item_id, cx)
+            });
         }
     }
 }

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use extension::{
-    BuildTaskTemplate, CodeLabel, Command, Completion, ContextServerConfiguration,
+    AddonStatusItem, BuildTaskTemplate, CodeLabel, Command, Completion, ContextServerConfiguration,
     DebugAdapterBinary, DebugRequest, DebugScenario, DebugTaskDefinition, Extension,
     ExtensionHostProxy, ExtensionManifest, KeyValueStoreDelegate, ProjectDelegate, SlashCommand,
     SlashCommandArgumentCompletion, SlashCommandOutput, StartDebuggingRequestArgumentsRequest,
@@ -312,4 +312,59 @@ async fn test_unknown_addon_command_fails(cx: &mut TestAppContext) {
         .await;
     assert!(unknown_addon.is_err());
     assert!(addon.commands_run.lock().is_empty());
+}
+
+fn status_item(id: &str, text: &str) -> AddonStatusItem {
+    AddonStatusItem {
+        id: id.into(),
+        text: text.into(),
+        tooltip: Some("Say hello".into()),
+        command: Some("say-hello".into()),
+    }
+}
+
+#[gpui::test]
+async fn test_status_items_show_in_the_status_bar(cx: &mut TestAppContext) {
+    let (app_state, proxy) = init_test(cx);
+    // Addons set their status items from `init`, before they are registered.
+    cx.update(|cx| proxy.set_status_item("hello-ui".into(), status_item("hello", "Hello 0"), cx));
+    let addon = FakeAddon::new(HELLO_MANIFEST);
+    cx.update(|cx| proxy.register_addon(addon.clone(), cx));
+    cx.update(|cx| proxy.set_status_item("hello-ui".into(), status_item("other", "Other"), cx));
+    // Setting an existing item again updates it in place.
+    cx.update(|cx| proxy.set_status_item("hello-ui".into(), status_item("hello", "Hello 1"), cx));
+
+    let registry = cx.update(|cx| AddonRegistry::global(cx).expect("registry is initialized"));
+    let texts = |cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            registry
+                .read(cx)
+                .status_items()
+                .into_iter()
+                .map(|(extension_id, item)| format!("{extension_id}/{}: {}", item.id, item.text))
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        texts(cx),
+        ["hello-ui/hello: Hello 1", "hello-ui/other: Other"]
+    );
+
+    let project = Project::test(app_state.fs.clone(), [], cx).await;
+    let (multi_workspace, window_cx) =
+        cx.add_window_view(|window, cx| MultiWorkspace::test_new(project.clone(), window, cx));
+    let workspace = multi_workspace.read_with(window_cx, |mw, _| mw.workspace().clone());
+    let status_items = workspace.read_with(window_cx, |workspace, cx| {
+        workspace
+            .status_bar()
+            .read(cx)
+            .item_of_type::<status_bar::AddonStatusItems>()
+    });
+    assert!(status_items.is_some(), "the status bar shows addon items");
+
+    cx.update(|cx| proxy.remove_status_item("hello-ui".into(), "other".into(), cx));
+    assert_eq!(texts(cx), ["hello-ui/hello: Hello 1"]);
+
+    cx.update(|cx| proxy.unregister_addon("hello-ui".into(), cx));
+    assert!(texts(cx).is_empty(), "unloading an addon removes its items");
 }

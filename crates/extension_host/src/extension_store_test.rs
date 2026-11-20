@@ -562,11 +562,11 @@ async fn test_extension_store(cx: &mut TestAppContext) {
         assert_eq!(
             theme_registry.list_names(),
             [
+                "Dark Modern",
                 "Monokai Dark",
                 "Monokai Light",
                 "Monokai Pro Dark",
                 "Monokai Pro Light",
-                "One Dark",
             ]
         );
     });
@@ -658,12 +658,12 @@ async fn test_extension_store(cx: &mut TestAppContext) {
         assert_eq!(
             theme_registry.list_names(),
             [
+                "Dark Modern",
                 "Gruvbox",
                 "Monokai Dark",
                 "Monokai Light",
                 "Monokai Pro Dark",
                 "Monokai Pro Light",
-                "One Dark",
             ]
         );
     });
@@ -723,12 +723,12 @@ async fn test_extension_store(cx: &mut TestAppContext) {
         assert_eq!(
             theme_registry.list_names(),
             [
+                "Dark Modern",
                 "Gruvbox",
                 "Monokai Dark",
                 "Monokai Light",
                 "Monokai Pro Dark",
                 "Monokai Pro Light",
-                "One Dark",
             ]
         );
 

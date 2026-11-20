@@ -7,8 +7,11 @@
 
 use crate::wasm_host::WasmState;
 use anyhow::Result;
-use extension::{KeyValueStoreDelegate, ProjectDelegate, WorktreeDelegate};
-use gpui::BackgroundExecutor;
+use extension::{
+    AddonStatusItem, ExtensionAddonProxy as _, ExtensionHostProxy, KeyValueStoreDelegate,
+    ProjectDelegate, WorktreeDelegate,
+};
+use gpui::{App, BackgroundExecutor};
 use semver::Version;
 use std::sync::{Arc, OnceLock};
 use wasmtime::component::{Linker, Resource};
@@ -233,7 +236,47 @@ impl ExtensionImports for WasmState {
     }
 }
 
-impl ui::Host for WasmState {}
+impl ui::Host for WasmState {
+    async fn set_status_item(
+        &mut self,
+        id: String,
+        text: String,
+        tooltip: Option<String>,
+        command: Option<String>,
+    ) -> wasmtime::Result<()> {
+        let item = AddonStatusItem {
+            id: id.into(),
+            text,
+            tooltip,
+            command: command.map(Into::into),
+        };
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.set_status_item(extension_id, item, cx)
+        })
+        .await
+    }
+
+    async fn remove_status_item(&mut self, id: String) -> wasmtime::Result<()> {
+        self.on_addon_ui(move |proxy, extension_id, cx| {
+            proxy.remove_status_item(extension_id, id.into(), cx)
+        })
+        .await
+    }
+}
+
+impl WasmState {
+    /// Runs `f` on the main thread with the addon UI proxy and this extension's ID.
+    fn on_addon_ui<T: 'static + Send>(
+        &self,
+        f: impl 'static + Send + FnOnce(&ExtensionHostProxy, Arc<str>, &mut App) -> T,
+    ) -> impl 'static + Future<Output = wasmtime::Result<T>> {
+        let proxy = self.host.proxy.clone();
+        let extension_id = self.manifest.id.clone();
+        let result =
+            self.on_main_thread(async move |cx| cx.update(|cx| f(&proxy, extension_id, cx)));
+        async move { Ok(result.await) }
+    }
+}
 
 impl super::Extension {
     pub async fn call_run_command(
@@ -256,13 +299,15 @@ impl super::Extension {
 #[cfg(test)]
 mod tests {
     use super::super::{Extension as VersionedExtension, is_supported_wasm_api_version};
+    use super::ui;
     use crate::capability_granter::CapabilityGranter;
     use crate::wasm_host::{WasmHost, WasmState};
-    use extension::{ExtensionHostProxy, ExtensionManifest};
+    use extension::{AddonStatusItem, ExtensionAddonProxy, ExtensionHostProxy, ExtensionManifest};
     use fs::FakeFs;
-    use gpui::TestAppContext;
+    use gpui::{App, TestAppContext};
     use http_client::FakeHttpClient;
     use node_runtime::NodeRuntime;
+    use parking_lot::Mutex;
     use release_channel::ReleaseChannel;
     use semver::Version;
     use settings::SettingsStore;
@@ -395,24 +440,26 @@ mod tests {
         Component::from_binary(engine, &component_bytes).expect("component should compile")
     }
 
-    #[gpui::test]
-    async fn test_v0_8_0_and_v0_9_0_extensions_load_on_every_channel(cx: &mut TestAppContext) {
+    fn test_host(cx: &mut TestAppContext, proxy: Arc<ExtensionHostProxy>) -> Arc<WasmHost> {
         cx.update(|cx| {
             let settings_store = SettingsStore::test(cx);
             cx.set_global(settings_store);
             release_channel::init(Version::new(0, 0, 0), cx);
         });
-        let host = cx.update(|cx| {
+        cx.update(|cx| {
             WasmHost::new(
                 FakeFs::new(cx.background_executor().clone()),
                 FakeHttpClient::with_404_response(),
                 NodeRuntime::unavailable(),
-                Arc::new(ExtensionHostProxy::new()),
+                proxy,
                 PathBuf::from("/work"),
                 cx,
             )
-        });
-        let manifest: Arc<ExtensionManifest> = Arc::new(
+        })
+    }
+
+    fn test_manifest() -> Arc<ExtensionManifest> {
+        Arc::new(
             toml::from_str(
                 r#"
                 id = "stub"
@@ -422,7 +469,24 @@ mod tests {
                 "#,
             )
             .expect("manifest should parse"),
-        );
+        )
+    }
+
+    fn test_state(host: &Arc<WasmHost>, manifest: &Arc<ExtensionManifest>) -> WasmState {
+        WasmState {
+            manifest: manifest.clone(),
+            table: ResourceTable::new(),
+            ctx: WasiCtxBuilder::new().build(),
+            host: host.clone(),
+            capability_granter: CapabilityGranter::new(Vec::new(), manifest.clone()),
+            language_server_status_source: None,
+        }
+    }
+
+    #[gpui::test]
+    async fn test_v0_8_0_and_v0_9_0_extensions_load_on_every_channel(cx: &mut TestAppContext) {
+        let host = test_host(cx, Arc::new(ExtensionHostProxy::new()));
+        let manifest = test_manifest();
         let executor = cx.background_executor.clone();
 
         for (wit_version_dir, version) in [
@@ -440,17 +504,7 @@ mod tests {
                     is_supported_wasm_api_version(channel, version.clone()),
                     "{version} should be supported on {channel:?}"
                 );
-                let mut store = wasmtime::Store::new(
-                    &host.engine,
-                    WasmState {
-                        manifest: manifest.clone(),
-                        table: ResourceTable::new(),
-                        ctx: WasiCtxBuilder::new().build(),
-                        host: host.clone(),
-                        capability_granter: CapabilityGranter::new(Vec::new(), manifest.clone()),
-                        language_server_status_source: None,
-                    },
-                );
+                let mut store = wasmtime::Store::new(&host.engine, test_state(&host, &manifest));
                 store.set_epoch_deadline(1);
                 store.epoch_deadline_async_yield_and_update(1);
                 let extension = VersionedExtension::instantiate_async(
@@ -472,5 +526,60 @@ mod tests {
                 assert_eq!(loaded_version, version);
             }
         }
+    }
+
+    /// Records what the host asks of the addon UI.
+    #[derive(Clone, Default)]
+    struct RecordingAddonProxy {
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl ExtensionAddonProxy for RecordingAddonProxy {
+        fn register_addon(&self, _extension: Arc<dyn extension::Extension>, _cx: &mut App) {}
+
+        fn unregister_addon(&self, _extension_id: Arc<str>, _cx: &mut App) {}
+
+        fn set_status_item(&self, extension_id: Arc<str>, item: AddonStatusItem, _cx: &mut App) {
+            self.calls.lock().push(format!(
+                "set {extension_id}/{} {:?} {:?} {:?}",
+                item.id, item.text, item.tooltip, item.command
+            ));
+        }
+
+        fn remove_status_item(&self, extension_id: Arc<str>, item_id: Arc<str>, _cx: &mut App) {
+            self.calls
+                .lock()
+                .push(format!("remove {extension_id}/{item_id}"));
+        }
+    }
+
+    #[gpui::test]
+    async fn test_status_item_imports_reach_the_addon_ui(cx: &mut TestAppContext) {
+        let proxy = Arc::new(ExtensionHostProxy::new());
+        let recorder = RecordingAddonProxy::default();
+        proxy.register_addon_proxy(recorder.clone());
+        let host = test_host(cx, proxy);
+        let mut state = test_state(&host, &test_manifest());
+
+        ui::Host::set_status_item(
+            &mut state,
+            "count".into(),
+            "Count: 1".into(),
+            Some("Say hello".into()),
+            Some("say-hello".into()),
+        )
+        .await
+        .unwrap();
+        ui::Host::remove_status_item(&mut state, "count".into())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            recorder.calls.lock().as_slice(),
+            [
+                r#"set stub/count "Count: 1" Some("Say hello") Some("say-hello")"#,
+                "remove stub/count",
+            ]
+        );
     }
 }
