@@ -6651,7 +6651,7 @@ See [Changing Vim Mode Settings](../vim.md#changing-vim-mode-settings) for a mor
   "project_panel": {
     "button": true,
     "default_width": 240,
-    "dock": "right",
+    "dock": "left",
     "entry_spacing": "comfortable",
     "file_icons": true,
     "folder_indicator": "icon",
@@ -7203,7 +7203,7 @@ Both types also accept:
 {
   "collaboration_panel": {
     "button": true,
-    "dock": "right",
+    "dock": "left",
     "default_width": 240
   }
 }
@@ -7284,7 +7284,7 @@ See the [debugger page](../debugger.md) for more information about debugging sup
 {
   "git_panel": {
     "button": true,
-    "dock": "right",
+    "dock": "left",
     "default_width": 360,
     "status_style": "icon",
     "file_icons": false,
@@ -7393,7 +7393,7 @@ You can define these in user or project settings; project settings are merged on
   "outline_panel": {
     "button": true,
     "default_width": 300,
-    "dock": "right",
+    "dock": "left",
     "file_icons": true,
     "folder_indicator": "icon",
     "git_status": true,

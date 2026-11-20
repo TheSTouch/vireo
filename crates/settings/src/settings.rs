@@ -245,6 +245,9 @@ mod vireo_layout_defaults {
         assert_default(&defaults, "/outline_panel/dock", json!("left"));
         assert_default(&defaults, "/git_panel/dock", json!("left"));
         assert_default(&defaults, "/debugger/dock", json!("left"));
+        // With the collaboration panel on the left too, the defaults are
+        // exactly Zed's "Editor" window layout preset.
+        assert_default(&defaults, "/collaboration_panel/dock", json!("left"));
         assert_default(&defaults, "/agent/dock", json!("right"));
         assert_default(&defaults, "/terminal/dock", json!("bottom"));
         assert_default(&defaults, "/project_panel/default_width", json!(300));
