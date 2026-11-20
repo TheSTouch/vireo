@@ -288,4 +288,20 @@ mod vireo_layout_defaults {
             json!("enabled"),
         );
     }
+
+    #[test]
+    fn title_bar_matches_vs_code() {
+        let defaults = defaults();
+        assert_default(&defaults, "/title_bar/show_command_center", json!(true));
+        assert_default(&defaults, "/title_bar/show_layout_controls", json!(true));
+        // Zed-only title bar items stay available behind these settings.
+        assert_default(&defaults, "/title_bar/show_collaboration", json!(false));
+        assert_default(&defaults, "/title_bar/show_sign_in", json!(false));
+        assert_default(&defaults, "/title_bar/show_user_menu", json!(false));
+        assert_default(&defaults, "/title_bar/show_onboarding_banner", json!(false));
+        // The command center names the project and the status bar shows the
+        // branch, so the title bar no longer repeats them.
+        assert_default(&defaults, "/title_bar/show_project_items", json!(false));
+        assert_default(&defaults, "/title_bar/show_branch_name", json!(false));
+    }
 }

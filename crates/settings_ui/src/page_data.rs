@@ -4423,7 +4423,7 @@ fn window_and_layout_page() -> SettingsPage {
         ]
     }
 
-    fn title_bar_section() -> [SettingsPageItem; 13] {
+    fn title_bar_section() -> [SettingsPageItem; 16] {
         [
             SettingsPageItem::SectionHeader("Title Bar"),
             SettingsPageItem::SettingItem(SettingItem {
@@ -4550,6 +4550,63 @@ fn window_and_layout_page() -> SettingsPage {
                             .title_bar
                             .get_or_insert_default()
                             .show_onboarding_banner = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Command Center",
+                description: "Show back, forward and the search box in the middle of the titlebar.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("title_bar.show_command_center"),
+                    pick: |settings_content| {
+                        settings_content.title_bar.as_ref()?.show_command_center.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .title_bar
+                            .get_or_insert_default()
+                            .show_command_center = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Layout Controls",
+                description: "Show the buttons that toggle the side bars and the panel.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("title_bar.show_layout_controls"),
+                    pick: |settings_content| {
+                        settings_content.title_bar.as_ref()?.show_layout_controls.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .title_bar
+                            .get_or_insert_default()
+                            .show_layout_controls = value;
+                    },
+                }),
+                metadata: None,
+                files: USER,
+            }),
+            SettingsPageItem::SettingItem(SettingItem {
+                title: "Show Collaboration",
+                description: "Show the people in the current call and the call controls.",
+                field: Box::new(SettingField {
+                    organization_override: None,
+                    json_path: Some("title_bar.show_collaboration"),
+                    pick: |settings_content| {
+                        settings_content.title_bar.as_ref()?.show_collaboration.as_ref()
+                    },
+                    write: |settings_content, value, _| {
+                        settings_content
+                            .title_bar
+                            .get_or_insert_default()
+                            .show_collaboration = value;
                     },
                 }),
                 metadata: None,

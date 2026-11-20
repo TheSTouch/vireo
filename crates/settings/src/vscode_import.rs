@@ -240,7 +240,7 @@ impl VsCodeSettings {
             telemetry: self.telemetry_settings_content(),
             terminal: self.terminal_settings_content(),
             theme: Box::new(self.theme_settings_content()),
-            title_bar: None,
+            title_bar: self.title_bar_settings_content(),
             vim: None,
             vim_mode: None,
             workspace: self.workspace_settings_content(),
@@ -898,6 +898,18 @@ impl VsCodeSettings {
                 .read_str("workbench.editor.editorActionsLocation")
                 .and_then(|str| if str == "hidden" { Some(false) } else { None }),
             show_pinned_tabs_in_separate_row: None,
+        })
+    }
+
+    fn title_bar_settings_content(&self) -> Option<TitleBarSettingsContent> {
+        let show_command_center = self.read_bool("window.commandCenter");
+        let show_layout_controls = self.read_bool("workbench.layoutControl.enabled");
+        (show_command_center.is_some() || show_layout_controls.is_some()).then(|| {
+            TitleBarSettingsContent {
+                show_command_center,
+                show_layout_controls,
+                ..Default::default()
+            }
         })
     }
 
@@ -1682,6 +1694,23 @@ mod tests {
         .settings_content();
 
         assert_eq!(settings.workspace.reveal_if_open, Some(true));
+    }
+
+    #[test]
+    fn test_import_command_center_and_layout_controls() {
+        let imported = |content: &str| {
+            VsCodeSettings::from_str(content, VsCodeSettingsSource::VsCode)
+                .unwrap()
+                .settings_content()
+                .title_bar
+        };
+        assert_eq!(imported("{}"), None);
+        let title_bar = imported(
+            r#"{ "window.commandCenter": false, "workbench.layoutControl.enabled": true }"#,
+        )
+        .expect("title bar settings should be imported");
+        assert_eq!(title_bar.show_command_center, Some(false));
+        assert_eq!(title_bar.show_layout_controls, Some(true));
     }
 
     #[test]

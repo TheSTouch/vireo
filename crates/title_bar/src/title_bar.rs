@@ -1,5 +1,6 @@
 mod application_menu;
 pub mod collab;
+mod command_center;
 mod onboarding_banner;
 mod plan_chip;
 mod update_version;
@@ -258,6 +259,7 @@ impl Render for TitleBar {
         let show_menus = show_menus(cx);
 
         let mut children = <ArrayVec<_, 5>>::new();
+        let mut folder_name = None;
 
         let mut project_name = None;
         let mut repository = None;
@@ -271,6 +273,7 @@ impl Render for TitleBar {
                 .root_name()
                 .file_name()
                 .map(|name| SharedString::from(name.to_string()));
+            folder_name = project_name.clone();
             if let Some(repo) = &repository {
                 let repo = repo.read(cx);
                 let worktree_paths = self.project.read(cx).worktree_paths(cx);
@@ -376,7 +379,9 @@ impl Render for TitleBar {
                 .into_any_element(),
         );
 
-        children.push(self.render_collaborator_list(window, cx).into_any_element());
+        if title_bar_settings.show_collaboration {
+            children.push(self.render_collaborator_list(window, cx).into_any_element());
+        }
 
         if title_bar_settings.show_onboarding_banner {
             if let Some(banner) = &self.banner {
@@ -405,7 +410,9 @@ impl Render for TitleBar {
                 .pr_1()
                 .gap_1()
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(self.render_call_controls(window, cx))
+                .when(title_bar_settings.show_collaboration, |this| {
+                    this.child(self.render_call_controls(window, cx))
+                })
                 .children(self.render_connection_status(status, cx))
                 .child(self.update_version.clone())
                 .when(
@@ -431,8 +438,38 @@ impl Render for TitleBar {
                 .when(TitleBarSettings::get_global(cx).show_user_menu, |this| {
                     this.child(self.render_user_menu_button(cx))
                 })
+                .when(title_bar_settings.show_layout_controls, |this| {
+                    this.children(command_center::render_layout_controls(&self.workspace, cx))
+                })
                 .into_any_element(),
         );
+
+        // VS Code centers the command center between the window's two sides:
+        // both sides take an equal share of the remaining width.
+        if title_bar_settings.show_command_center {
+            let right = children.pop();
+            let left = h_flex()
+                .flex_1()
+                .min_w_0()
+                .h_full()
+                .children(children.drain(..))
+                .into_any_element();
+            children.push(left);
+            children.push(
+                command_center::render_command_center(folder_name, cx)
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .into_any_element(),
+            );
+            children.push(
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .justify_end()
+                    .children(right)
+                    .into_any_element(),
+            );
+        }
 
         if show_menus {
             self.platform_titlebar.update(cx, |this, _| {

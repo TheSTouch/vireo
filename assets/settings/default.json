@@ -634,21 +634,32 @@
     // Whether to show git status indicators on the branch icon in the titlebar.
     "show_branch_status_icon": false,
     // Whether to show the branch name button in the titlebar.
-    "show_branch_name": true,
+    // Vireo shows the branch in the status bar instead.
+    "show_branch_name": false,
     // Whether to show the worktree name button in the titlebar.
     "show_worktree_name": true,
     // Whether to show the project host and name in the titlebar.
-    "show_project_items": true,
+    // Vireo names the project in the command center instead.
+    "show_project_items": false,
     // Whether to show onboarding banners in the titlebar.
-    "show_onboarding_banner": true,
+    "show_onboarding_banner": false,
     // Whether to show user picture in the titlebar.
     "show_user_picture": true,
     // Whether to show the user menu in the titlebar.
-    "show_user_menu": true,
+    // Vireo's account menu is at the bottom of the activity bar.
+    "show_user_menu": false,
     // Whether to show the sign in button in the titlebar.
-    "show_sign_in": true,
+    "show_sign_in": false,
     // Whether to show the menus in the titlebar.
     "show_menus": false,
+    // Whether to show the command center: back, forward and a search box
+    // that opens the file finder, in the middle of the titlebar.
+    "show_command_center": true,
+    // Whether to show the buttons that toggle the primary side bar, the
+    // panel and the secondary side bar.
+    "show_layout_controls": true,
+    // Whether to show collaboration (people in the call, call controls).
+    "show_collaboration": false,
     // Whether to open the menus in the titlebar on hover.
     "open_menus_on_hover": false,
     // The layout of window control buttons in the title bar (Linux only).

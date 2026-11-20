@@ -6444,14 +6444,17 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
   "title_bar": {
     "show": "always",
     "show_branch_status_icon": false,
-    "show_branch_name": true,
+    "show_branch_name": false,
     "show_worktree_name": true,
-    "show_project_items": true,
-    "show_onboarding_banner": true,
+    "show_project_items": false,
+    "show_onboarding_banner": false,
     "show_user_picture": true,
-    "show_user_menu": true,
-    "show_sign_in": true,
+    "show_user_menu": false,
+    "show_sign_in": false,
     "show_menus": false,
+    "show_command_center": true,
+    "show_layout_controls": true,
+    "show_collaboration": false,
     "open_menus_on_hover": false,
     "button_layout": "platform_default"
   }
@@ -6470,6 +6473,9 @@ Run the {#action theme_selector::Toggle} action in the command palette to see a 
 - `show_user_menu`: Whether to show the user menu button in the titlebar (the one that displays your avatar by default and contains options like Settings, Keymap, Themes, etc.)
 - `show_sign_in`: Whether to show the sign in button in the titlebar
 - `show_menus`: Whether to show the menus in the titlebar
+- `show_command_center`: Whether to show the command center in the middle of the titlebar: back, forward and a search box that opens the file finder
+- `show_layout_controls`: Whether to show the buttons that toggle the primary side bar, the panel and the secondary side bar
+- `show_collaboration`: Whether to show the people in the current call and the call controls
 - `open_menus_on_hover`: Whether to open title-bar menus on hover. Once a menu is open, hovering always switches between menus.
 - `button_layout`: The layout of window control buttons in the title bar (Linux only). Can be set to `"platform_default"` to follow the system setting, `"standard"` to use Zed's built-in layout, or a custom format like `"close:minimize,maximize"`
 

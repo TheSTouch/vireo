@@ -13,6 +13,9 @@ pub struct TitleBarSettings {
     pub show_sign_in: bool,
     pub show_user_menu: bool,
     pub show_menus: bool,
+    pub show_command_center: bool,
+    pub show_layout_controls: bool,
+    pub show_collaboration: bool,
     pub open_menus_on_hover: bool,
     pub button_layout: Option<WindowButtonLayout>,
 }
@@ -43,6 +46,9 @@ impl Settings for TitleBarSettings {
             show_sign_in: content.show_sign_in.unwrap(),
             show_user_menu: content.show_user_menu.unwrap(),
             show_menus: content.show_menus.unwrap(),
+            show_command_center: content.show_command_center.unwrap(),
+            show_layout_controls: content.show_layout_controls.unwrap(),
+            show_collaboration: content.show_collaboration.unwrap(),
             open_menus_on_hover: content.open_menus_on_hover.unwrap(),
             button_layout: content.button_layout.unwrap_or_default().into_layout(),
         }

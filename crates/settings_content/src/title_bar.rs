@@ -116,7 +116,7 @@ pub struct TitleBarSettingsContent {
     pub show_branch_status_icon: Option<bool>,
     /// Whether to show onboarding banners in the title bar.
     ///
-    /// Default: true
+    /// Default: false
     pub show_onboarding_banner: Option<bool>,
     /// Whether to show user avatar in the title bar.
     ///
@@ -124,7 +124,7 @@ pub struct TitleBarSettingsContent {
     pub show_user_picture: Option<bool>,
     /// Whether to show the branch name button in the titlebar.
     ///
-    /// Default: true
+    /// Default: false
     pub show_branch_name: Option<bool>,
     /// Whether to show the worktree name button in the titlebar.
     ///
@@ -132,20 +132,35 @@ pub struct TitleBarSettingsContent {
     pub show_worktree_name: Option<bool>,
     /// Whether to show the project host and name in the titlebar.
     ///
-    /// Default: true
+    /// Default: false
     pub show_project_items: Option<bool>,
     /// Whether to show the sign in button in the title bar.
     ///
-    /// Default: true
+    /// Default: false
     pub show_sign_in: Option<bool>,
     /// Whether to show the user menu button in the title bar.
     ///
-    /// Default: true
+    /// Default: false
     pub show_user_menu: Option<bool>,
     /// Whether to show the menus in the title bar.
     ///
     /// Default: false
     pub show_menus: Option<bool>,
+    /// Whether to show the command center in the middle of the title bar:
+    /// back and forward buttons and a search box that opens the file finder.
+    ///
+    /// Default: true
+    pub show_command_center: Option<bool>,
+    /// Whether to show the buttons that toggle the primary side bar, the
+    /// panel and the secondary side bar at the right of the title bar.
+    ///
+    /// Default: true
+    pub show_layout_controls: Option<bool>,
+    /// Whether to show collaboration in the title bar: the people in the
+    /// current call and the call controls.
+    ///
+    /// Default: false
+    pub show_collaboration: Option<bool>,
     /// Whether to automatically open the menus in the title bar on hover.
     ///
     /// Default: false
