@@ -341,8 +341,8 @@ pub enum ThemeSelection {
     },
 }
 
-pub const DEFAULT_LIGHT_THEME: &'static str = "One Light";
-pub const DEFAULT_DARK_THEME: &'static str = "One Dark";
+pub const DEFAULT_LIGHT_THEME: &'static str = "Light Modern";
+pub const DEFAULT_DARK_THEME: &'static str = "Dark Modern";
 
 impl Default for ThemeSelection {
     fn default() -> Self {
@@ -761,6 +761,54 @@ pub struct ThemeColorsContent {
 
     #[serde(rename = "tab.active_background")]
     pub tab_active_background: Option<ThemeColor>,
+
+    /// Background of the activity bar at the window's left edge.
+    #[serde(rename = "activity_bar.background")]
+    pub activity_bar_background: Option<ThemeColor>,
+
+    /// Icon color of the active activity bar item.
+    #[serde(rename = "activity_bar.foreground")]
+    pub activity_bar_foreground: Option<ThemeColor>,
+
+    /// Icon color of inactive activity bar items.
+    #[serde(rename = "activity_bar.inactive_foreground")]
+    pub activity_bar_inactive_foreground: Option<ThemeColor>,
+
+    /// Bar drawn beside the active activity bar item.
+    #[serde(rename = "activity_bar.active_border")]
+    pub activity_bar_active_border: Option<ThemeColor>,
+
+    /// Background of activity bar badges, such as a change count.
+    #[serde(rename = "activity_bar.badge.background")]
+    pub activity_bar_badge_background: Option<ThemeColor>,
+
+    /// Text color of activity bar badges.
+    #[serde(rename = "activity_bar.badge.foreground")]
+    pub activity_bar_badge_foreground: Option<ThemeColor>,
+
+    /// Label color of the active editor tab.
+    #[serde(rename = "tab.active_foreground")]
+    pub tab_active_foreground: Option<ThemeColor>,
+
+    /// Label color of inactive editor tabs.
+    #[serde(rename = "tab.inactive_foreground")]
+    pub tab_inactive_foreground: Option<ThemeColor>,
+
+    /// Border drawn along the top of the active editor tab.
+    #[serde(rename = "tab.active_border")]
+    pub tab_active_border: Option<ThemeColor>,
+
+    /// Text and icon color of status bar items.
+    #[serde(rename = "status_bar.foreground")]
+    pub status_bar_foreground: Option<ThemeColor>,
+
+    /// Background of the remote indicator at the status bar's left end.
+    #[serde(rename = "status_bar.remote_background")]
+    pub status_bar_remote_background: Option<ThemeColor>,
+
+    /// Icon color of the remote indicator.
+    #[serde(rename = "status_bar.remote_foreground")]
+    pub status_bar_remote_foreground: Option<ThemeColor>,
 
     #[serde(rename = "search.match_background")]
     pub search_match_background: Option<ThemeColor>,

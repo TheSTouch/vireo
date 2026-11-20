@@ -464,6 +464,54 @@ pub fn theme_colors_refinement(
             .tab_active_background
             .as_ref()
             .and_then(|color| try_parse_color(color).ok()),
+        activity_bar_background: this
+            .activity_bar_background
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        activity_bar_foreground: this
+            .activity_bar_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        activity_bar_inactive_foreground: this
+            .activity_bar_inactive_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        activity_bar_active_border: this
+            .activity_bar_active_border
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        activity_bar_badge_background: this
+            .activity_bar_badge_background
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        activity_bar_badge_foreground: this
+            .activity_bar_badge_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        tab_active_foreground: this
+            .tab_active_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        tab_inactive_foreground: this
+            .tab_inactive_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        tab_active_border: this
+            .tab_active_border
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        status_bar_foreground: this
+            .status_bar_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        status_bar_remote_background: this
+            .status_bar_remote_background
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
+        status_bar_remote_foreground: this
+            .status_bar_remote_foreground
+            .as_ref()
+            .and_then(|color| try_parse_color(color).ok()),
         search_match_background,
         search_active_match_background,
         panel_background,

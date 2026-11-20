@@ -322,6 +322,7 @@ pub fn refine_theme(theme: &ThemeContent) -> Theme {
     );
     theme::apply_theme_color_defaults(&mut theme_colors_refinement, &refined_player_colors);
     refined_theme_colors.refine(&theme_colors_refinement);
+    theme::apply_chrome_color_fallbacks(&mut refined_theme_colors, &theme_colors_refinement);
 
     let mut refined_accent_colors = match theme.appearance {
         AppearanceContent::Light => AccentColors::light(),
@@ -460,4 +461,105 @@ pub fn increase_buffer_font_size(cx: &mut App) {
 /// This will be effective until the app is restarted.
 pub fn decrease_buffer_font_size(cx: &mut App) {
     adjust_buffer_font_size(cx, |size| size - px(1.0));
+}
+
+#[cfg(test)]
+mod vireo_theme_tests {
+    use gpui::{Hsla, Rgba};
+    use theme::{Appearance, ThemeFamily};
+
+    use crate::{ThemeFamilyContent, refine_theme_family};
+
+    fn family(json: &str) -> ThemeFamily {
+        let content: ThemeFamilyContent =
+            serde_json_lenient::from_str(json).expect("bundled theme family should parse");
+        refine_theme_family(content)
+    }
+
+    fn hex(color: Hsla) -> String {
+        let rgba = Rgba::from(color);
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            (rgba.r * 255.).round() as u8,
+            (rgba.g * 255.).round() as u8,
+            (rgba.b * 255.).round() as u8
+        )
+    }
+
+    #[test]
+    fn bundles_vs_code_default_themes() {
+        let family = family(include_str!("../../../assets/themes/vscode/vscode.json"));
+        let themes: Vec<_> = family
+            .themes
+            .iter()
+            .map(|theme| (theme.name.to_string(), theme.appearance))
+            .collect();
+        assert_eq!(
+            themes,
+            [
+                ("Dark Modern".to_string(), Appearance::Dark),
+                ("Light Modern".to_string(), Appearance::Light),
+                ("Dark+".to_string(), Appearance::Dark),
+                ("Light+".to_string(), Appearance::Light),
+            ]
+        );
+        assert_eq!(settings::DEFAULT_DARK_THEME, "Dark Modern");
+        assert_eq!(settings::DEFAULT_LIGHT_THEME, "Light Modern");
+    }
+
+    #[test]
+    fn dark_modern_uses_vs_code_chrome_colors() {
+        let family = family(include_str!("../../../assets/themes/vscode/vscode.json"));
+        let dark_modern = family
+            .themes
+            .iter()
+            .find(|theme| theme.name.as_ref() == "Dark Modern")
+            .expect("Dark Modern should be bundled");
+        let colors = dark_modern.colors();
+        assert_eq!(hex(colors.editor_background), "#1f1f1f");
+        assert_eq!(hex(colors.panel_background), "#181818");
+        assert_eq!(hex(colors.activity_bar_background), "#181818");
+        assert_eq!(hex(colors.activity_bar_foreground), "#d7d7d7");
+        assert_eq!(hex(colors.activity_bar_inactive_foreground), "#868686");
+        assert_eq!(hex(colors.activity_bar_active_border), "#0078d4");
+        assert_eq!(hex(colors.activity_bar_badge_background), "#0078d4");
+        assert_eq!(hex(colors.tab_active_border), "#0078d4");
+        assert_eq!(hex(colors.tab_active_foreground), "#ffffff");
+        assert_eq!(hex(colors.tab_inactive_foreground), "#9d9d9d");
+        assert_eq!(hex(colors.status_bar_background), "#181818");
+        assert_eq!(hex(colors.status_bar_foreground), "#cccccc");
+        assert_eq!(hex(colors.status_bar_remote_background), "#0078d4");
+        assert_eq!(hex(colors.border), "#2b2b2b");
+    }
+
+    #[test]
+    fn dark_plus_keeps_its_blue_status_bar_and_no_tab_top_border() {
+        let family = family(include_str!("../../../assets/themes/vscode/vscode.json"));
+        let dark_plus = family
+            .themes
+            .iter()
+            .find(|theme| theme.name.as_ref() == "Dark+")
+            .expect("Dark+ should be bundled");
+        let colors = dark_plus.colors();
+        assert_eq!(hex(colors.status_bar_background), "#007acc");
+        assert_eq!(hex(colors.activity_bar_background), "#333333");
+        assert_eq!(colors.tab_active_border.a, 0.);
+    }
+
+    #[test]
+    fn themes_without_chrome_colors_derive_them() {
+        let family = family(include_str!("../../../assets/themes/one/one.json"));
+        let one_dark = family
+            .themes
+            .iter()
+            .find(|theme| theme.name.as_ref() == "One Dark")
+            .expect("One Dark should be bundled");
+        let colors = one_dark.colors();
+        assert_eq!(colors.activity_bar_background, colors.status_bar_background);
+        assert_eq!(colors.activity_bar_foreground, colors.icon);
+        assert_eq!(colors.activity_bar_active_border, colors.text_accent);
+        assert_eq!(colors.tab_active_foreground, colors.text);
+        assert_eq!(colors.status_bar_foreground, colors.text_muted);
+        assert_eq!(colors.tab_active_border.a, 0.);
+    }
 }

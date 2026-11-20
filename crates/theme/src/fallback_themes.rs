@@ -57,6 +57,73 @@ pub fn apply_theme_color_defaults(
     }
 }
 
+/// Fills Vireo's chrome colors (activity bar, tab labels, status bar text)
+/// from a theme's existing colors when the theme does not set them.
+pub fn apply_chrome_color_fallbacks(colors: &mut ThemeColors, refinement: &ThemeColorsRefinement) {
+    let derived = [
+        (
+            refinement.activity_bar_background.is_none(),
+            &mut colors.activity_bar_background,
+            colors.status_bar_background,
+        ),
+        (
+            refinement.activity_bar_foreground.is_none(),
+            &mut colors.activity_bar_foreground,
+            colors.icon,
+        ),
+        (
+            refinement.activity_bar_inactive_foreground.is_none(),
+            &mut colors.activity_bar_inactive_foreground,
+            colors.icon_muted,
+        ),
+        (
+            refinement.activity_bar_active_border.is_none(),
+            &mut colors.activity_bar_active_border,
+            colors.text_accent,
+        ),
+        (
+            refinement.activity_bar_badge_background.is_none(),
+            &mut colors.activity_bar_badge_background,
+            colors.text_accent,
+        ),
+        (
+            refinement.activity_bar_badge_foreground.is_none(),
+            &mut colors.activity_bar_badge_foreground,
+            colors.editor_background,
+        ),
+        (
+            refinement.tab_active_foreground.is_none(),
+            &mut colors.tab_active_foreground,
+            colors.text,
+        ),
+        (
+            refinement.tab_inactive_foreground.is_none(),
+            &mut colors.tab_inactive_foreground,
+            colors.text_muted,
+        ),
+        (
+            refinement.status_bar_foreground.is_none(),
+            &mut colors.status_bar_foreground,
+            colors.text_muted,
+        ),
+        (
+            refinement.status_bar_remote_background.is_none(),
+            &mut colors.status_bar_remote_background,
+            colors.text_accent,
+        ),
+        (
+            refinement.status_bar_remote_foreground.is_none(),
+            &mut colors.status_bar_remote_foreground,
+            colors.editor_background,
+        ),
+    ];
+    for (missing, color, fallback) in derived {
+        if missing {
+            *color = fallback;
+        }
+    }
+}
+
 pub(crate) fn zed_default_dark() -> Theme {
     let bg = hsla(215. / 360., 12. / 100., 15. / 100., 1.);
     let editor = hsla(220. / 360., 12. / 100., 18. / 100., 1.);
@@ -155,6 +222,18 @@ pub(crate) fn zed_default_dark() -> Theme {
                 tab_bar_background: bg,
                 tab_inactive_background: bg,
                 tab_active_background: editor,
+                activity_bar_background: bg,
+                activity_bar_foreground: hsla(0.0, 0.0, 85.0 / 100., 1.0),
+                activity_bar_inactive_foreground: gray,
+                activity_bar_active_border: blue,
+                activity_bar_badge_background: blue,
+                activity_bar_badge_foreground: editor,
+                tab_active_foreground: hsla(0.0, 0.0, 85.0 / 100., 1.0),
+                tab_inactive_foreground: gray,
+                tab_active_border: gpui::transparent_black(),
+                status_bar_foreground: hsla(0.0, 0.0, 70.0 / 100., 1.0),
+                status_bar_remote_background: blue,
+                status_bar_remote_foreground: editor,
                 search_match_background: bg,
                 search_active_match_background: bg,
 

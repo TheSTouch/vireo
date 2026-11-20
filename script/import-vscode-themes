@@ -1,0 +1,538 @@
+#!/usr/bin/env python3
+"""Regenerate assets/themes/vscode/vscode.json from VS Code's default themes.
+
+Usage: script/import-vscode-themes <path to microsoft/vscode checkout>
+
+VS Code's theme files only hold the colors they change: each one includes a
+base theme ("include"), and anything the chain leaves unset falls back to the
+workbench defaults compiled into VS Code. crates/theme_importer reads a single
+file and maps few UI colors, so this script:
+
+1. resolves the include chain and fills in the workbench defaults,
+2. runs theme_importer on the flattened theme for the syntax colors,
+3. maps the workbench colors onto Zed's theme keys itself.
+
+The themes are MIT licensed; see assets/themes/LICENSES.
+"""
+
+import json
+import re
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parent.parent
+OUTPUT = REPO / "assets/themes/vscode/vscode.json"
+
+THEMES = [
+    ("Dark Modern", "dark_modern.json", "dark"),
+    ("Light Modern", "light_modern.json", "light"),
+    ("Dark+", "dark_plus.json", "dark"),
+    ("Light+", "light_plus.json", "light"),
+]
+
+# Workbench color defaults that VS Code registers in code (colorRegistry and the
+# workbench's theme.ts) for its dark and light base themes. Only the keys this
+# script reads are listed.
+WORKBENCH_DEFAULTS = {
+    "dark": {
+        "foreground": "#CCCCCC",
+        "descriptionForeground": "#CCCCCCB3",
+        "disabledForeground": "#CCCCCC80",
+        "errorForeground": "#F48771",
+        "focusBorder": "#007FD4",
+        "icon.foreground": "#C5C5C5",
+        "textLink.foreground": "#3794FF",
+        "textLink.activeForeground": "#3794FF",
+        "activityBar.background": "#333333",
+        "activityBar.foreground": "#FFFFFF",
+        "activityBar.inactiveForeground": "#FFFFFF66",
+        "activityBar.activeBorder": "#FFFFFF",
+        "activityBarBadge.background": "#007ACC",
+        "activityBarBadge.foreground": "#FFFFFF",
+        "badge.background": "#4D4D4D",
+        "badge.foreground": "#FFFFFF",
+        "sideBar.background": "#252526",
+        "sideBarTitle.foreground": "#BBBBBB",
+        "titleBar.activeBackground": "#3C3C3C",
+        "titleBar.activeForeground": "#CCCCCC",
+        "titleBar.inactiveBackground": "#3C3C3C99",
+        "statusBar.background": "#007ACC",
+        "statusBar.foreground": "#FFFFFF",
+        "statusBarItem.hoverBackground": "#FFFFFF1F",
+        "statusBarItem.remoteBackground": "#16825D",
+        "statusBarItem.remoteForeground": "#FFFFFF",
+        "editorGroupHeader.tabsBackground": "#252526",
+        "editorGroup.border": "#444444",
+        "tab.inactiveBackground": "#2D2D2D",
+        "tab.activeForeground": "#FFFFFF",
+        "tab.inactiveForeground": "#FFFFFF80",
+        "tab.border": "#252526",
+        "panel.border": "#80808059",
+        "panelTitle.activeForeground": "#E7E7E7",
+        "panelTitle.inactiveForeground": "#E7E7E799",
+        "list.hoverBackground": "#2A2D2E",
+        "list.activeSelectionBackground": "#04395E",
+        "list.inactiveSelectionBackground": "#37373D",
+        "list.dropBackground": "#383B3D",
+        "tree.indentGuidesStroke": "#585858",
+        "input.background": "#3C3C3C",
+        "input.placeholderForeground": "#A6A6A6",
+        "dropdown.background": "#3C3C3C",
+        "editorWidget.background": "#252526",
+        "editorCursor.foreground": "#AEAFAD",
+        "editor.selectionBackground": "#264F78",
+        "editor.lineHighlightBorder": "#282828",
+        "editor.findMatchBackground": "#515C6A",
+        "editor.findMatchHighlightBackground": "#EA5C0055",
+        "editor.wordHighlightBackground": "#575757B8",
+        "editor.wordHighlightStrongBackground": "#004972B8",
+        "editorBracketMatch.background": "#0064001A",
+        "editorLineNumber.foreground": "#858585",
+        "editorLineNumber.activeForeground": "#C6C6C6",
+        "editorIndentGuide.background1": "#404040",
+        "editorIndentGuide.activeBackground1": "#707070",
+        "editorWhitespace.foreground": "#E3E4E229",
+        "editorRuler.foreground": "#5A5A5A",
+        "editorOverviewRuler.border": "#7F7F7F4D",
+        "editorError.foreground": "#F14C4C",
+        "editorWarning.foreground": "#CCA700",
+        "editorInfo.foreground": "#3794FF",
+        "editorInlayHint.foreground": "#969696",
+        "editorGutter.addedBackground": "#487E02",
+        "editorGutter.modifiedBackground": "#1B81A8",
+        "editorGutter.deletedBackground": "#F14C4C",
+        "gitDecoration.addedResourceForeground": "#81B88B",
+        "gitDecoration.modifiedResourceForeground": "#E2C08D",
+        "gitDecoration.deletedResourceForeground": "#C74E39",
+        "gitDecoration.untrackedResourceForeground": "#73C991",
+        "gitDecoration.ignoredResourceForeground": "#8C8C8C",
+        "gitDecoration.conflictingResourceForeground": "#E4676B",
+        "scrollbarSlider.background": "#79797966",
+        "scrollbarSlider.hoverBackground": "#646464B3",
+        "scrollbarSlider.activeBackground": "#BFBFBF66",
+        "terminal.foreground": "#CCCCCC",
+        "terminal.ansiBlack": "#000000",
+        "terminal.ansiRed": "#CD3131",
+        "terminal.ansiGreen": "#0DBC79",
+        "terminal.ansiYellow": "#E5E510",
+        "terminal.ansiBlue": "#2472C8",
+        "terminal.ansiMagenta": "#BC3FBC",
+        "terminal.ansiCyan": "#11A8CD",
+        "terminal.ansiWhite": "#E5E5E5",
+        "terminal.ansiBrightBlack": "#666666",
+        "terminal.ansiBrightRed": "#F14C4C",
+        "terminal.ansiBrightGreen": "#23D18B",
+        "terminal.ansiBrightYellow": "#F5F543",
+        "terminal.ansiBrightBlue": "#3B8EEA",
+        "terminal.ansiBrightMagenta": "#D670D6",
+        "terminal.ansiBrightCyan": "#29B8DB",
+        "terminal.ansiBrightWhite": "#E5E5E5",
+    },
+    "light": {
+        "foreground": "#616161",
+        "descriptionForeground": "#717171",
+        "disabledForeground": "#61616180",
+        "errorForeground": "#A1260D",
+        "focusBorder": "#0090F1",
+        "icon.foreground": "#424242",
+        "textLink.foreground": "#006AB1",
+        "textLink.activeForeground": "#006AB1",
+        "activityBar.background": "#2C2C2C",
+        "activityBar.foreground": "#FFFFFF",
+        "activityBar.inactiveForeground": "#FFFFFF66",
+        "activityBar.activeBorder": "#FFFFFF",
+        "activityBarBadge.background": "#007ACC",
+        "activityBarBadge.foreground": "#FFFFFF",
+        "badge.background": "#C4C4C4",
+        "badge.foreground": "#333333",
+        "sideBar.background": "#F3F3F3",
+        "sideBarTitle.foreground": "#6F6F6F",
+        "titleBar.activeBackground": "#DDDDDD",
+        "titleBar.activeForeground": "#333333",
+        "titleBar.inactiveBackground": "#DDDDDD99",
+        "statusBar.background": "#007ACC",
+        "statusBar.foreground": "#FFFFFF",
+        "statusBarItem.hoverBackground": "#FFFFFF1F",
+        "statusBarItem.remoteBackground": "#16825D",
+        "statusBarItem.remoteForeground": "#FFFFFF",
+        "editorGroupHeader.tabsBackground": "#F3F3F3",
+        "editorGroup.border": "#E7E7E7",
+        "tab.inactiveBackground": "#ECECEC",
+        "tab.activeForeground": "#333333",
+        "tab.inactiveForeground": "#33333380",
+        "tab.border": "#F3F3F3",
+        "panel.border": "#80808059",
+        "panelTitle.activeForeground": "#424242",
+        "panelTitle.inactiveForeground": "#42424275",
+        "list.hoverBackground": "#E8E8E8",
+        "list.activeSelectionBackground": "#0060C0",
+        "list.inactiveSelectionBackground": "#E4E6F1",
+        "list.dropBackground": "#D6EBFF",
+        "tree.indentGuidesStroke": "#A9A9A9",
+        "input.background": "#FFFFFF",
+        "input.placeholderForeground": "#767676",
+        "dropdown.background": "#FFFFFF",
+        "editorWidget.background": "#F3F3F3",
+        "editorCursor.foreground": "#000000",
+        "editor.selectionBackground": "#ADD6FF",
+        "editor.lineHighlightBorder": "#EEEEEE",
+        "editor.findMatchBackground": "#A8AC94",
+        "editor.findMatchHighlightBackground": "#EA5C0055",
+        "editor.wordHighlightBackground": "#57575740",
+        "editor.wordHighlightStrongBackground": "#0E639C40",
+        "editorBracketMatch.background": "#0064001A",
+        "editorLineNumber.foreground": "#237893",
+        "editorLineNumber.activeForeground": "#0B216F",
+        "editorIndentGuide.background1": "#D3D3D3",
+        "editorIndentGuide.activeBackground1": "#939393",
+        "editorWhitespace.foreground": "#33333333",
+        "editorRuler.foreground": "#D3D3D3",
+        "editorOverviewRuler.border": "#7F7F7F4D",
+        "editorError.foreground": "#E51400",
+        "editorWarning.foreground": "#BF8803",
+        "editorInfo.foreground": "#1A85FF",
+        "editorInlayHint.foreground": "#969696",
+        "editorGutter.addedBackground": "#48985D",
+        "editorGutter.modifiedBackground": "#2090D3",
+        "editorGutter.deletedBackground": "#F14C4C",
+        "gitDecoration.addedResourceForeground": "#587C0C",
+        "gitDecoration.modifiedResourceForeground": "#895503",
+        "gitDecoration.deletedResourceForeground": "#AD0707",
+        "gitDecoration.untrackedResourceForeground": "#007100",
+        "gitDecoration.ignoredResourceForeground": "#8E8E90",
+        "gitDecoration.conflictingResourceForeground": "#AD0707",
+        "scrollbarSlider.background": "#64646466",
+        "scrollbarSlider.hoverBackground": "#646464B3",
+        "scrollbarSlider.activeBackground": "#00000099",
+        "terminal.foreground": "#333333",
+        "terminal.ansiBlack": "#000000",
+        "terminal.ansiRed": "#CD3131",
+        "terminal.ansiGreen": "#00BC00",
+        "terminal.ansiYellow": "#949800",
+        "terminal.ansiBlue": "#0451A5",
+        "terminal.ansiMagenta": "#BC05BC",
+        "terminal.ansiCyan": "#0598BC",
+        "terminal.ansiWhite": "#555555",
+        "terminal.ansiBrightBlack": "#666666",
+        "terminal.ansiBrightRed": "#CD3131",
+        "terminal.ansiBrightGreen": "#14CE14",
+        "terminal.ansiBrightYellow": "#B5BA00",
+        "terminal.ansiBrightBlue": "#0451A5",
+        "terminal.ansiBrightMagenta": "#BC05BC",
+        "terminal.ansiBrightCyan": "#0598BC",
+        "terminal.ansiBrightWhite": "#A5A5A5",
+    },
+}
+
+
+def read_jsonc(path):
+    """Parses JSON with comments and trailing commas, as VS Code writes it."""
+    text = path.read_text()
+    out = []
+    index = 0
+    in_string = False
+    while index < len(text):
+        char = text[index]
+        if in_string:
+            out.append(char)
+            if char == "\\":
+                out.append(text[index + 1])
+                index += 1
+            elif char == '"':
+                in_string = False
+        elif char == '"':
+            in_string = True
+            out.append(char)
+        elif text.startswith("//", index):
+            index = text.find("\n", index)
+            if index == -1:
+                break
+            continue
+        elif text.startswith("/*", index):
+            index = text.find("*/", index) + 2
+            continue
+        else:
+            out.append(char)
+        index += 1
+    return json.loads(re.sub(r",(\s*[}\]])", r"\1", "".join(out)))
+
+
+def flatten(path):
+    theme = read_jsonc(path)
+    include = theme.get("include")
+    if not include:
+        return theme
+    base = flatten((path.parent / include).resolve())
+    return {
+        "name": theme.get("name", base.get("name")),
+        "colors": {**base.get("colors", {}), **theme.get("colors", {})},
+        "tokenColors": base.get("tokenColors", []) + theme.get("tokenColors", []),
+        "semanticTokenColors": {
+            **base.get("semanticTokenColors", {}),
+            **theme.get("semanticTokenColors", {}),
+        },
+    }
+
+
+def color(value):
+    """Normalizes #RGB, #RRGGBB and #RRGGBBAA to #rrggbbaa."""
+    value = value.lower()
+    if len(value) == 4:
+        value = "#" + "".join(channel * 2 for channel in value[1:])
+    if len(value) == 7:
+        value += "ff"
+    return value
+
+
+def with_alpha(value, alpha):
+    return color(value)[:7] + f"{round(alpha * 255):02x}"
+
+
+def ui_colors(colors, appearance):
+    c = {**WORKBENCH_DEFAULTS[appearance], **colors}
+
+    def get(*keys):
+        for key in keys:
+            if key in c:
+                return color(c[key])
+        raise KeyError(keys)
+
+    editor = get("editor.background")
+    sidebar = get("sideBar.background")
+    border = get("sideBar.border", "editorGroup.border")
+    focus = get("focusBorder")
+    terminal = {
+        name: get(f"terminal.ansi{key}")
+        for name, key in [
+            ("black", "Black"), ("red", "Red"), ("green", "Green"), ("yellow", "Yellow"),
+            ("blue", "Blue"), ("magenta", "Magenta"), ("cyan", "Cyan"), ("white", "White"),
+        ]
+    }
+    terminal_bright = {
+        name: get(f"terminal.ansiBright{key}")
+        for name, key in [
+            ("black", "Black"), ("red", "Red"), ("green", "Green"), ("yellow", "Yellow"),
+            ("blue", "Blue"), ("magenta", "Magenta"), ("cyan", "Cyan"), ("white", "White"),
+        ]
+    }
+    scrollbar = get("scrollbarSlider.background")
+    result = {
+        "border": border,
+        "border.variant": get("sideBarSectionHeader.border", "panel.border", "editorGroup.border"),
+        "border.focused": focus,
+        "border.selected": focus,
+        "border.transparent": "#00000000",
+        "border.disabled": border,
+        "elevated_surface.background": get("quickInput.background", "editorWidget.background"),
+        "surface.background": sidebar,
+        "background": sidebar,
+        "element.background": get("input.background"),
+        "element.hover": get("list.hoverBackground"),
+        "element.active": get("list.activeSelectionBackground"),
+        "element.selected": get("list.inactiveSelectionBackground"),
+        "element.disabled": get("input.background"),
+        "drop_target.background": get("list.dropBackground"),
+        "ghost_element.background": "#00000000",
+        "ghost_element.hover": get("list.hoverBackground"),
+        "ghost_element.active": get("list.activeSelectionBackground"),
+        "ghost_element.selected": get("list.inactiveSelectionBackground"),
+        "ghost_element.disabled": "#00000000",
+        "text": get("foreground"),
+        "text.muted": get("descriptionForeground"),
+        "text.placeholder": get("input.placeholderForeground"),
+        "text.disabled": get("disabledForeground"),
+        "text.accent": get("textLink.foreground"),
+        "icon": get("icon.foreground"),
+        "icon.muted": get("descriptionForeground"),
+        "icon.disabled": get("disabledForeground"),
+        "icon.placeholder": get("input.placeholderForeground"),
+        "icon.accent": get("textLink.foreground"),
+        "title_bar.background": get("titleBar.activeBackground"),
+        "title_bar.inactive_background": get("titleBar.inactiveBackground"),
+        "status_bar.background": get("statusBar.background"),
+        "status_bar.foreground": get("statusBar.foreground"),
+        "status_bar.remote_background": get("statusBarItem.remoteBackground"),
+        "status_bar.remote_foreground": get("statusBarItem.remoteForeground"),
+        "activity_bar.background": get("activityBar.background"),
+        "activity_bar.foreground": get("activityBar.foreground"),
+        "activity_bar.inactive_foreground": get("activityBar.inactiveForeground"),
+        "activity_bar.active_border": get("activityBar.activeBorder"),
+        "activity_bar.badge.background": get("activityBarBadge.background"),
+        "activity_bar.badge.foreground": get("activityBarBadge.foreground"),
+        "toolbar.background": get("breadcrumb.background", "editor.background"),
+        "tab_bar.background": get("editorGroupHeader.tabsBackground"),
+        "tab.inactive_background": get("tab.inactiveBackground"),
+        "tab.active_background": get("tab.activeBackground", "editor.background"),
+        "tab.active_foreground": get("tab.activeForeground"),
+        "tab.inactive_foreground": get("tab.inactiveForeground"),
+        # Dark+ and Light+ have no top border on the active tab; Zed keeps the
+        # slot transparent so the tab renders the same as in VS Code.
+        "tab.active_border": get("tab.activeBorderTop") if "tab.activeBorderTop" in c else "#00000000",
+        "panel.background": sidebar,
+        "panel.focused_border": focus,
+        "panel.indent_guide": get("tree.indentGuidesStroke"),
+        "panel.indent_guide_hover": get("tree.indentGuidesStroke"),
+        "panel.indent_guide_active": get("tree.indentGuidesStroke"),
+        "pane.focused_border": focus,
+        "pane_group.border": get("editorGroup.border"),
+        "search.match_background": get("editor.findMatchHighlightBackground"),
+        "search.active_match_background": get("editor.findMatchBackground"),
+        "scrollbar.thumb.background": scrollbar,
+        "scrollbar.thumb.hover_background": get("scrollbarSlider.hoverBackground"),
+        "scrollbar.thumb.active_background": get("scrollbarSlider.activeBackground"),
+        "scrollbar.thumb.border": "#00000000",
+        "scrollbar.track.background": "#00000000",
+        "scrollbar.track.border": get("editorOverviewRuler.border"),
+        "minimap.thumb.background": get("minimapSlider.background") if "minimapSlider.background" in c else with_alpha(scrollbar, int(scrollbar[7:], 16) / 255 / 2),
+        "minimap.thumb.hover_background": get("scrollbarSlider.hoverBackground"),
+        "minimap.thumb.active_background": get("scrollbarSlider.activeBackground"),
+        "minimap.thumb.border": "#00000000",
+        "editor.foreground": get("editor.foreground", "foreground"),
+        "editor.background": editor,
+        "editor.gutter.background": get("editorGutter.background", "editor.background"),
+        "editor.subheader.background": sidebar,
+        "editor.active_line.background": get("editor.lineHighlightBackground", "editor.lineHighlightBorder"),
+        "editor.highlighted_line.background": get("editor.rangeHighlightBackground", "editor.lineHighlightBorder"),
+        "editor.line_number": get("editorLineNumber.foreground"),
+        "editor.active_line_number": get("editorLineNumber.activeForeground"),
+        "editor.hover_line_number": get("editorLineNumber.activeForeground"),
+        "editor.invisible": get("editorWhitespace.foreground"),
+        "editor.wrap_guide": get("editorRuler.foreground"),
+        "editor.active_wrap_guide": get("editorRuler.foreground"),
+        "editor.indent_guide": get("editorIndentGuide.background1"),
+        "editor.indent_guide_active": get("editorIndentGuide.activeBackground1"),
+        "editor.document_highlight.read_background": get("editor.wordHighlightBackground"),
+        "editor.document_highlight.write_background": get("editor.wordHighlightStrongBackground"),
+        "editor.document_highlight.bracket_background": get("editorBracketMatch.background"),
+        "terminal.background": get("terminal.background", "panel.background", "editor.background"),
+        "terminal.foreground": get("terminal.foreground"),
+        "terminal.bright_foreground": get("terminal.foreground"),
+        "terminal.dim_foreground": get("descriptionForeground"),
+        "link_text.hover": get("textLink.activeForeground"),
+        "version_control.added": get("editorGutter.addedBackground"),
+        "version_control.modified": get("editorGutter.modifiedBackground"),
+        "version_control.deleted": get("editorGutter.deletedBackground"),
+        "version_control.renamed": get("gitDecoration.untrackedResourceForeground"),
+        "version_control.conflict": get("gitDecoration.conflictingResourceForeground"),
+        "version_control.ignored": get("gitDecoration.ignoredResourceForeground"),
+        "created": get("gitDecoration.untrackedResourceForeground"),
+        "modified": get("gitDecoration.modifiedResourceForeground"),
+        "deleted": get("gitDecoration.deletedResourceForeground"),
+        "renamed": get("gitDecoration.untrackedResourceForeground"),
+        "conflict": get("gitDecoration.conflictingResourceForeground"),
+        "ignored": get("gitDecoration.ignoredResourceForeground"),
+        "hidden": get("gitDecoration.ignoredResourceForeground"),
+        "error": get("editorError.foreground"),
+        "warning": get("editorWarning.foreground"),
+        "info": get("editorInfo.foreground"),
+        "hint": get("editorInlayHint.foreground"),
+        "success": get("gitDecoration.addedResourceForeground"),
+    }
+    for name, value in terminal.items():
+        result[f"terminal.ansi.{name}"] = value
+        result[f"terminal.ansi.dim_{name}"] = with_alpha(value, 0.7)
+    for name, value in terminal_bright.items():
+        result[f"terminal.ansi.bright_{name}"] = value
+    players = [
+        {
+            "cursor": get("editorCursor.foreground"),
+            "background": get("editorCursor.foreground"),
+            "selection": get("editor.selectionBackground"),
+        }
+    ]
+    return result, players
+
+
+# theme_importer matches some Zed tokens to HTML scopes (tag punctuation,
+# HTML attributes) and leaves others unmatched. These are the colors the
+# Dark+ and Light+ token rules (and their semantic token defaults) give the
+# constructs Zed's tokens stand for.
+SYNTAX_FIXES = {
+    "dark": {
+        "constant": "#4FC1FF",
+        "constructor": "#4EC9B0",
+        "enum": "#4EC9B0",
+        "namespace": "#4EC9B0",
+        "variant": "#4FC1FF",
+        "property": "#9CDCFE",
+        "variable.parameter": "#9CDCFE",
+        "string.escape": "#D7BA7D",
+        "string.regex": "#D16969",
+        "preproc": "#C586C0",
+        "title": "#569CD6",
+        "link_text": "#CE9178",
+        "link_uri": "#3794FF",
+        "punctuation.markup": "#6796E6",
+        "punctuation.list_marker": "#6796E6",
+    },
+    "light": {
+        "constant": "#0070C1",
+        "constructor": "#267F99",
+        "enum": "#267F99",
+        "namespace": "#267F99",
+        "variant": "#0070C1",
+        "property": "#001080",
+        "variable.parameter": "#001080",
+        "string.escape": "#EE0000",
+        "string.regex": "#811F3F",
+        "preproc": "#AF00DB",
+        "title": "#800000",
+        "link_text": "#A31515",
+        "link_uri": "#006AB1",
+        "punctuation.markup": "#0451A5",
+        "punctuation.list_marker": "#0451A5",
+    },
+}
+
+
+def fix_syntax(syntax, colors, appearance):
+    editor_foreground = color({**WORKBENCH_DEFAULTS[appearance], **colors}.get("editor.foreground", WORKBENCH_DEFAULTS[appearance]["foreground"]))
+    for token in ["punctuation", "punctuation.bracket", "punctuation.delimiter", "punctuation.special", "operator", "primary", "embedded"]:
+        syntax[token] = {"color": editor_foreground}
+    for token, value in SYNTAX_FIXES[appearance].items():
+        syntax[token] = {"color": color(value)}
+    syntax["title"]["font_weight"] = 700
+    syntax["emphasis"] = {"font_style": "italic"}
+    syntax["emphasis.strong"] = {"font_weight": 700}
+
+
+def main():
+    if len(sys.argv) != 2:
+        sys.exit(__doc__)
+    themes_dir = Path(sys.argv[1]) / "extensions/theme-defaults/themes"
+    family = {
+        "$schema": "https://zed.dev/schema/themes/v0.2.0.json",
+        "name": "Vireo Default",
+        "author": "Microsoft Corporation, ported to Vireo",
+        "themes": [],
+    }
+    with tempfile.TemporaryDirectory() as scratch:
+        for name, file_name, appearance in THEMES:
+            flat = flatten(themes_dir / file_name)
+            flat["name"] = name
+            flat_path = Path(scratch) / file_name
+            flat_path.write_text(json.dumps(flat))
+            imported_path = Path(scratch) / f"imported-{file_name}"
+            subprocess.run(
+                ["cargo", "run", "--quiet", "-p", "theme_importer", "--", str(flat_path), "--output", str(imported_path)],
+                cwd=REPO,
+                check=True,
+            )
+            imported = json.loads(imported_path.read_text())
+            style = imported["style"]
+            colors, players = ui_colors(flat["colors"], appearance)
+            # Keep the importer's status backgrounds and borders; replace the
+            # UI colors it maps loosely (it reads only a handful of keys).
+            style.update(colors)
+            style["players"] = players
+            fix_syntax(style["syntax"], flat["colors"], appearance)
+            family["themes"].append({"name": name, "appearance": appearance, "style": style})
+    OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    OUTPUT.write_text(json.dumps(family, indent=2) + "\n")
+    print(f"wrote {OUTPUT.relative_to(REPO)}")
+
+
+if __name__ == "__main__":
+    main()

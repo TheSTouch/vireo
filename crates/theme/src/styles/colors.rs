@@ -127,6 +127,30 @@ pub struct ThemeColors {
     pub tab_bar_background: Hsla,
     pub tab_inactive_background: Hsla,
     pub tab_active_background: Hsla,
+    /// Background of the activity bar at the window's left edge.
+    pub activity_bar_background: Hsla,
+    /// Icon color of the active activity bar item.
+    pub activity_bar_foreground: Hsla,
+    /// Icon color of inactive activity bar items.
+    pub activity_bar_inactive_foreground: Hsla,
+    /// Bar drawn beside the active activity bar item.
+    pub activity_bar_active_border: Hsla,
+    /// Background of activity bar badges, such as a change count.
+    pub activity_bar_badge_background: Hsla,
+    /// Text color of activity bar badges.
+    pub activity_bar_badge_foreground: Hsla,
+    /// Label color of the active editor tab.
+    pub tab_active_foreground: Hsla,
+    /// Label color of inactive editor tabs.
+    pub tab_inactive_foreground: Hsla,
+    /// Border drawn along the top of the active editor tab.
+    pub tab_active_border: Hsla,
+    /// Text and icon color of status bar items.
+    pub status_bar_foreground: Hsla,
+    /// Background of the remote indicator at the status bar's left end.
+    pub status_bar_remote_background: Hsla,
+    /// Icon color of the remote indicator.
+    pub status_bar_remote_foreground: Hsla,
     pub search_match_background: Hsla,
     pub search_active_match_background: Hsla,
     pub panel_background: Hsla,
@@ -386,6 +410,18 @@ pub enum ThemeColorField {
     TabBarBackground,
     TabInactiveBackground,
     TabActiveBackground,
+    ActivityBarBackground,
+    ActivityBarForeground,
+    ActivityBarInactiveForeground,
+    ActivityBarActiveBorder,
+    ActivityBarBadgeBackground,
+    ActivityBarBadgeForeground,
+    TabActiveForeground,
+    TabInactiveForeground,
+    TabActiveBorder,
+    StatusBarForeground,
+    StatusBarRemoteBackground,
+    StatusBarRemoteForeground,
     SearchMatchBackground,
     SearchActiveMatchBackground,
     PanelBackground,
@@ -511,6 +547,18 @@ impl ThemeColors {
             ThemeColorField::TabBarBackground => self.tab_bar_background,
             ThemeColorField::TabInactiveBackground => self.tab_inactive_background,
             ThemeColorField::TabActiveBackground => self.tab_active_background,
+            ThemeColorField::ActivityBarBackground => self.activity_bar_background,
+            ThemeColorField::ActivityBarForeground => self.activity_bar_foreground,
+            ThemeColorField::ActivityBarInactiveForeground => self.activity_bar_inactive_foreground,
+            ThemeColorField::ActivityBarActiveBorder => self.activity_bar_active_border,
+            ThemeColorField::ActivityBarBadgeBackground => self.activity_bar_badge_background,
+            ThemeColorField::ActivityBarBadgeForeground => self.activity_bar_badge_foreground,
+            ThemeColorField::TabActiveForeground => self.tab_active_foreground,
+            ThemeColorField::TabInactiveForeground => self.tab_inactive_foreground,
+            ThemeColorField::TabActiveBorder => self.tab_active_border,
+            ThemeColorField::StatusBarForeground => self.status_bar_foreground,
+            ThemeColorField::StatusBarRemoteBackground => self.status_bar_remote_background,
+            ThemeColorField::StatusBarRemoteForeground => self.status_bar_remote_foreground,
             ThemeColorField::SearchMatchBackground => self.search_match_background,
             ThemeColorField::SearchActiveMatchBackground => self.search_active_match_background,
             ThemeColorField::PanelBackground => self.panel_background,
