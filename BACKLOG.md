@@ -100,6 +100,28 @@ so far ("Open" lists what the owner may still change before a session starts it)
   of the platform), with the session id on each line.
 - **Code:** `crates/claude_code_ui/src/extras.rs` (`ClaudeLogs`, `show_logs`).
 
+### V-10. Text in your own messages can be selected and copied
+
+- **Today:** the messages you send are drawn as a plain label (`render_user` in
+  `crates/claude_code_ui/src/view.rs`, `Label::new(text)`), so you cannot select part of them to copy.
+  Claude's replies use the Markdown element and can be selected.
+- **Expected:** select any part of your messages with the mouse and copy it with Cmd+C, like Claude's
+  replies; and a copy button on hover that copies the whole message, as in the extension. Check that
+  tool call input and output blocks can be selected too.
+- **Code:** render the user text with the same selectable element as the replies (plain text, not
+  Markdown, so what you typed is shown as typed).
+
+### V-11. AskUserQuestion shows its options
+
+- **Today:** when Claude asks a multiple-choice question (the AskUserQuestion tool), the panel shows a
+  generic permission card instead of the options, so the question cannot really be answered (seen on
+  2026-11-21: the owner never saw the choices). `docs/src/vs-core/claude-parity.md` lists it as Todo.
+- **Expected:** a picker as in the extension: the question, its options with their descriptions
+  (single or multiple choice), an "Other" free text field, keyboard selection, and Submit, which
+  sends the answers back as the tool's result.
+- **Code:** `crates/claude_code_ui/src/view.rs` `render_permission`, the `can_use_tool` request
+  for `AskUserQuestion` in `session.rs` and `protocol.rs`.
+
 ## Done
 
 - `@` opens a file and folder list in the message box: `ac2410e811`.
