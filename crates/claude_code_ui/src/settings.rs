@@ -20,6 +20,7 @@ pub struct ClaudeCodeSettings {
     pub preferred_location: ClaudeCodePreferredLocation,
     pub new_conversation_opens_in: ClaudeCodeOpensIn,
     pub past_conversation_opens_in: ClaudeCodeOpensIn,
+    pub open_on_project_open: bool,
     pub lock_editor_groups: bool,
     pub enable_new_conversation_shortcut: bool,
     pub enable_reopen_closed_session_shortcut: bool,
@@ -69,6 +70,7 @@ impl Settings for ClaudeCodeSettings {
             preferred_location: claude.preferred_location.unwrap_or_default(),
             new_conversation_opens_in: claude.new_conversation_opens_in.unwrap_or_default(),
             past_conversation_opens_in: claude.past_conversation_opens_in.unwrap_or_default(),
+            open_on_project_open: claude.open_on_project_open.unwrap_or(true),
             lock_editor_groups: claude.lock_editor_groups.unwrap_or(true),
             enable_new_conversation_shortcut: claude
                 .enable_new_conversation_shortcut
@@ -137,6 +139,7 @@ mod tests {
             assert!(settings.attach_open_file);
             assert!(settings.attach_selection);
             assert!(settings.continue_after_reload);
+            assert!(settings.open_on_project_open);
             assert!(settings.enable_reopen_closed_session_shortcut);
             assert!(!settings.enable_new_conversation_shortcut);
             assert!(!settings.use_ctrl_enter_to_send);

@@ -302,6 +302,7 @@ impl VsCodeSettings {
             // Vireo's own settings, with no counterpart in the extension.
             new_conversation_opens_in: None,
             past_conversation_opens_in: None,
+            open_on_project_open: None,
             lock_editor_groups: self.read_bool("claudeCode.lockEditorGroups"),
             enable_new_conversation_shortcut: self
                 .read_bool("claudeCode.enableNewConversationShortcut"),

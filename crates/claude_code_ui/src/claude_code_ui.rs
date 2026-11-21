@@ -223,6 +223,46 @@ fn focus_input(
     open_preferred(workspace, window, cx);
 }
 
+/// `open_on_project_open`: when a window opens on a project folder, shows the
+/// Claude panel with the project's newest conversation, or a new one, and
+/// focuses its message box. Called once the window's docks are restored, so
+/// that their saved state does not close the panel again.
+pub fn open_on_project_open(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let cwd = panel::workspace_cwd(workspace.project(), cx);
+    let transcripts_dir = sessions::transcripts_dir(&claude_ide::claude_config_dir(), &cwd);
+    open_on_project_open_from(workspace, transcripts_dir, window, cx);
+}
+
+fn open_on_project_open_from(
+    workspace: &mut Workspace,
+    transcripts_dir: std::path::PathBuf,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let settings = ClaudeCodeSettings::get_global(cx);
+    if !settings.open_on_project_open || settings.use_terminal {
+        return;
+    }
+    let has_folder = workspace
+        .visible_worktrees(cx)
+        .any(|worktree| !worktree.read(cx).is_single_file());
+    if !has_folder {
+        return;
+    }
+    let Some(panel) = workspace.focus_panel::<ClaudeCodePanel>(window, cx) else {
+        return;
+    };
+    let view = panel.read(cx).view.clone();
+    window.focus(&view.read(cx).input_focus_handle(cx), cx);
+    panel.update(cx, |panel, cx| {
+        panel.resume_newest_conversation(transcripts_dir, window, cx)
+    });
+}
+
 /// Opens a new conversation in an editor tab with `prompt` in its message
 /// box, not sent, so the person reads it first (the Develop Vireo page's
 /// prepared sessions).

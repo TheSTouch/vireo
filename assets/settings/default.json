@@ -2110,6 +2110,9 @@
     "new_conversation_opens_in": "new_tab",
     // Where a conversation picked from past conversations opens: "new_tab" or "current".
     "past_conversation_opens_in": "new_tab",
+    // Show Claude in the side bar with the project's latest conversation when a
+    // project folder opens.
+    "open_on_project_open": true,
     // Keep files opened from a Claude tab out of the pane that holds it.
     "lock_editor_groups": true,
     // Use Cmd/Ctrl+N for a new conversation while Claude is focused.

@@ -819,8 +819,12 @@ fn initialize_panels(window: &mut Window, cx: &mut Context<Workspace>) -> Task<a
             initialize_agent_panel(workspace_handle.clone(), cx.clone()).map(|r| r.log_err()),
         );
 
-        workspace_handle.update(cx, |workspace, cx| {
+        workspace_handle.update_in(cx, |workspace, window, cx| {
             workspace.finish_dock_restoration(cx);
+            // Zed's own tests check which docks a new window opens.
+            if !cfg!(test) {
+                claude_code_ui::open_on_project_open(workspace, window, cx);
+            }
         })?;
 
         anyhow::Ok(())

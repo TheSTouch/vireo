@@ -328,6 +328,14 @@ pub fn list_sessions(dir: &Path, store: &SessionStore) -> Vec<SessionSummary> {
     sessions
 }
 
+/// The most recent session of a workspace folder that is not archived.
+pub fn newest_session(dir: &Path, store: &SessionStore) -> Option<String> {
+    list_sessions(dir, store)
+        .into_iter()
+        .find(|session| !session.meta.archived)
+        .map(|session| session.session_id)
+}
+
 /// Sessions idle for longer than `days` that are not open, running or unread.
 pub fn sessions_to_archive(
     sessions: &[SessionSummary],

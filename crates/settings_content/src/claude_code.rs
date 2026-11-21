@@ -66,6 +66,12 @@ pub struct ClaudeCodeSettingsContent {
     ///
     /// Default: new_tab
     pub past_conversation_opens_in: Option<ClaudeCodeOpensIn>,
+    /// When a project folder opens in a window, show Claude in the side bar
+    /// with the project's most recent conversation, or a new one when it has
+    /// none, ready to type in.
+    ///
+    /// Default: true
+    pub open_on_project_open: Option<bool>,
     /// Keep files opened from a Claude tab out of the pane that holds it.
     ///
     /// Default: true
