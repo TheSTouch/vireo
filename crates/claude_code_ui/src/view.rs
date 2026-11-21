@@ -178,7 +178,7 @@ impl ClaudeCodeView {
         .detach();
         // Tests drive the session themselves rather than starting a real `claude`.
         this.session.update(cx, |session, cx| {
-            if cfg!(test) {
+            if cx.is_test() {
                 return;
             }
             if let Err(error) = session.start(cx) {

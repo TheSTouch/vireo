@@ -166,7 +166,7 @@ pub fn update_store(cx: &mut App, f: impl FnOnce(&mut SessionStore)) {
     let store = cx.global_mut::<GlobalSessionStore>();
     f(&mut store.0);
     let snapshot = store.0.clone();
-    if cfg!(test) {
+    if cx.is_test() {
         return;
     }
     cx.background_spawn(async move {
