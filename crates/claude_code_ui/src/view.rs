@@ -82,6 +82,8 @@ pub struct ClaudeCodeView {
     collapsed: HashSet<usize>,
     /// Tool calls the person opened in full, past the preview's lines.
     full_output: HashSet<usize>,
+    /// Timeline rows followed by another, which a rail joins to the next dot.
+    rails: HashSet<usize>,
     pub focus_view: bool,
     attachments: Vec<Attachment>,
     editor_context: Option<EditorContext>,
@@ -180,6 +182,7 @@ impl ClaudeCodeView {
             expanded: HashSet::new(),
             collapsed: HashSet::new(),
             full_output: HashSet::new(),
+            rails: HashSet::new(),
             focus_view: settings.focus_view,
             attachments: Vec::new(),
             editor_context: None,
@@ -873,18 +876,28 @@ impl ClaudeCodeView {
         let entries = self.session.read(cx).conversation.entries.clone();
         let mut elements = Vec::with_capacity(entries.len());
         let mut previous_day = None;
+        let focus_view = self.focus_view;
+        let visible = |entry: &Entry| {
+            !(focus_view && entry.is_activity())
+                && !matches!(entry, Entry::AssistantText(text) if text.parent_tool_use_id.is_some())
+                && !matches!(entry, Entry::ToolCall(call) if call.parent_tool_use_id.is_some())
+        };
+        let shown: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| visible(entry))
+            .map(|(index, _)| index)
+            .collect();
+        self.rails = shown
+            .windows(2)
+            .filter(|pair| {
+                !matches!(entries.get(pair[0]), Some(Entry::User(_)))
+                    && !matches!(entries.get(pair[1]), Some(Entry::User(_)))
+            })
+            .map(|pair| pair[0])
+            .collect();
         for (index, entry) in entries.iter().enumerate() {
-            if self.focus_view && entry.is_activity() {
-                continue;
-            }
-            if let Entry::AssistantText(text) = entry
-                && text.parent_tool_use_id.is_some()
-            {
-                continue;
-            }
-            if let Entry::ToolCall(call) = entry
-                && call.parent_tool_use_id.is_some()
-            {
+            if !visible(entry) {
                 continue;
             }
             let local: DateTime<Local> = entry.timestamp().with_timezone(&Local);
@@ -918,12 +931,10 @@ impl ClaudeCodeView {
                         index,
                         Color::Default,
                         false,
-                        MarkdownElement::new(
-                            markdown,
-                            MarkdownStyle::themed(MarkdownFont::Agent, window, cx),
-                        )
-                        .into_any_element(),
+                        MarkdownElement::new(markdown, message_markdown_style(window, cx))
+                            .into_any_element(),
                         timestamp,
+                        self.rail(index, cx),
                     )
                 }
                 Entry::Thinking(thinking) => self.render_thinking(index, thinking, cx),
@@ -946,6 +957,7 @@ impl ClaudeCodeView {
                         })
                         .into_any_element(),
                     None,
+                    self.rail(index, cx),
                 ),
             };
             elements.push(element);
@@ -1023,7 +1035,7 @@ impl ClaudeCodeView {
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.editor_background)
-                    .child(Label::new(text.to_string()).size(LabelSize::Small))
+                    .child(Label::new(text.to_string()))
                     .when(user.images > 0, |this| {
                         this.child(
                             h_flex()
@@ -1094,7 +1106,20 @@ impl ClaudeCodeView {
                             .italic(),
                     )
                 });
-        timeline_row(index, Color::Muted, false, content.into_any_element(), None)
+        timeline_row(
+            index,
+            Color::Muted,
+            false,
+            content.into_any_element(),
+            None,
+            self.rail(index, cx),
+        )
+    }
+
+    fn rail(&self, index: usize, cx: &App) -> Option<gpui::Hsla> {
+        self.rails
+            .contains(&index)
+            .then(|| cx.theme().colors().border_variant)
     }
 
     fn toggle_expanded(&mut self, index: usize, cx: &mut Context<Self>) {
@@ -1249,7 +1274,14 @@ impl ClaudeCodeView {
             .min_w_0()
             .child(header)
             .when(expanded, |this| this.child(body));
-        timeline_row(index, dot, running, content.into_any_element(), None)
+        timeline_row(
+            index,
+            dot,
+            running,
+            content.into_any_element(),
+            None,
+            self.rail(index, cx),
+        )
     }
 
     fn render_permission(
@@ -1296,6 +1328,7 @@ impl ClaudeCodeView {
                     )
                     .into_any_element(),
                 None,
+                self.rail(index, cx),
             );
         }
         let question = tool.title.clone().unwrap_or_else(|| {
@@ -2272,6 +2305,22 @@ impl ClaudeCodeView {
     }
 }
 
+/// Claude's replies in the size of the rest of the panel rather than the
+/// larger agent font, with code a step smaller, as in the extension.
+fn message_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
+    let mut style = MarkdownStyle::themed(MarkdownFont::Agent, window, cx);
+    let text_size = TextSize::Default.rems(cx);
+    let code_size = rems_from_px(13_f32);
+    style.base_text_style.font_size = text_size.into();
+    // Paragraphs take their size from the container, not the base style.
+    style.container_style.text.font_size = Some(text_size.into());
+    style.base_text_style.line_height = gpui::relative(1.5);
+    style.code_block.text.font_size = Some(code_size.into());
+    style.inline_code.font_size = Some(code_size.into());
+    style.paragraph_line_height = gpui::relative(1.5);
+    style
+}
+
 fn workspace_project(workspace: &Workspace) -> Entity<Project> {
     workspace.project().clone()
 }
@@ -2342,12 +2391,15 @@ impl Render for ClaudeCodeView {
     }
 }
 
+/// One step of the reply: a dot, the content, and, when another step follows,
+/// a rail from this dot down to the next one.
 fn timeline_row(
     index: usize,
     dot: Color,
     animated: bool,
     content: AnyElement,
     timestamp: Option<String>,
+    rail: Option<gpui::Hsla>,
 ) -> AnyElement {
     let dot_element = Icon::new(if animated {
         IconName::LoadCircle
@@ -2366,7 +2418,26 @@ fn timeline_row(
         .w_full()
         .items_start()
         .gap_2()
-        .child(div().pt_0p5().flex_none().child(dot_element))
+        .child(
+            div()
+                .relative()
+                .self_stretch()
+                .flex_none()
+                .pt_0p5()
+                .child(dot_element)
+                .when_some(rail, |this, rail| {
+                    // Reaches past the row into the list's gap, to the next dot.
+                    this.child(
+                        div()
+                            .absolute()
+                            .top(px(16.))
+                            .bottom(px(-6.))
+                            .left(px(5.5))
+                            .w_px()
+                            .bg(rail),
+                    )
+                }),
+        )
         .child(div().flex_1().min_w_0().child(content))
         .when_some(timestamp, |this, timestamp| {
             this.child(
