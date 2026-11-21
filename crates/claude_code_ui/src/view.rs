@@ -77,6 +77,9 @@ pub struct ClaudeCodeView {
     focus_handle: FocusHandle,
     scroll_handle: ScrollHandle,
     markdown: HashMap<usize, (usize, Entity<Markdown>)>,
+    /// Text shown as typed but selectable: your messages and tool calls'
+    /// input and output, by entry and part.
+    plain_text: HashMap<(usize, PlainPart), (String, Entity<Markdown>)>,
     expanded: HashSet<usize>,
     /// Tool calls the person closed; they start open, as in the extension.
     collapsed: HashSet<usize>,
@@ -184,6 +187,7 @@ impl ClaudeCodeView {
             focus_handle: cx.focus_handle(),
             scroll_handle: ScrollHandle::new(),
             markdown: HashMap::new(),
+            plain_text: HashMap::new(),
             expanded: HashSet::new(),
             collapsed: HashSet::new(),
             full_output: HashSet::new(),
@@ -899,6 +903,33 @@ impl ClaudeCodeView {
         markdown
     }
 
+    /// Text drawn exactly as written, newlines kept and nothing taken as
+    /// Markdown, in an element that can be selected and copied.
+    fn plain_text_for(
+        &mut self,
+        index: usize,
+        part: PlainPart,
+        text: &str,
+        cx: &mut Context<Self>,
+    ) -> Entity<Markdown> {
+        if let Some((cached, markdown)) = self.plain_text.get(&(index, part))
+            && cached == text
+        {
+            return markdown.clone();
+        }
+        let markdown = cx.new(|cx| Markdown::new_text(text.to_string().into(), cx));
+        self.plain_text
+            .insert((index, part), (text.to_string(), markdown.clone()));
+        markdown
+    }
+
+    fn copy_user_message(&self, index: usize, cx: &mut App) {
+        if let Some(Entry::User(user)) = self.session.read(cx).conversation.entries.get(index) {
+            let text = strip_context_preamble(&user.text).to_string();
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
+        }
+    }
+
     fn render_entries(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let settings = ClaudeCodeSettings::get_global(cx).clone();
         let entries = self.session.read(cx).conversation.entries.clone();
@@ -952,7 +983,7 @@ impl ClaudeCodeView {
                 .show_message_timestamps
                 .then(|| local.format("%-I:%M %p").to_string());
             let element = match entry {
-                Entry::User(user) => self.render_user(index, user, timestamp, cx),
+                Entry::User(user) => self.render_user(index, user, timestamp, window, cx),
                 Entry::AssistantText(text) => {
                     let markdown = self.markdown_for(index, &text.text, cx);
                     timeline_row(
@@ -966,7 +997,7 @@ impl ClaudeCodeView {
                     )
                 }
                 Entry::Thinking(thinking) => self.render_thinking(index, thinking, cx),
-                Entry::ToolCall(call) => self.render_tool_call(index, call, cx),
+                Entry::ToolCall(call) => self.render_tool_call(index, call, window, cx),
                 Entry::Permission(request) => self.render_permission(index, request, window, cx),
                 Entry::Notice(notice) => timeline_row(
                     index,
@@ -994,52 +1025,67 @@ impl ClaudeCodeView {
     }
 
     fn render_user(
-        &self,
+        &mut self,
         index: usize,
         user: &crate::conversation::UserEntry,
         timestamp: Option<String>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let text = self.plain_text_for(
+            index,
+            PlainPart::Message,
+            strip_context_preamble(&user.text),
+            cx,
+        );
         let colors = cx.theme().colors();
-        let text = strip_context_preamble(&user.text);
         let group: SharedString = format!("claude-user-{index}").into();
-        let actions = user
-            .uuid
-            .clone()
-            .filter(|_| !self.is_running(cx))
-            .map(|user_message_id| {
-                h_flex()
-                    .justify_end()
-                    .gap_0p5()
-                    .visible_on_hover(group.clone())
-                    .child(
-                        IconButton::new(("fork", index), IconName::GitBranch)
-                            .icon_size(IconSize::XSmall)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Fork conversation from here"))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.fork_from(index, false, window, cx)
-                            })),
-                    )
-                    .child(
-                        IconButton::new(("rewind", index), IconName::RotateCcw)
-                            .icon_size(IconSize::XSmall)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Rewind code to here"))
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.rewind_code_to(user_message_id.clone(), cx)
-                            })),
-                    )
-                    .child(
-                        IconButton::new(("fork-rewind", index), IconName::GitBranchPlus)
-                            .icon_size(IconSize::XSmall)
-                            .icon_color(Color::Muted)
-                            .tooltip(Tooltip::text("Fork conversation and rewind code"))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                this.fork_from(index, true, window, cx)
-                            })),
-                    )
-            });
+        let copy_button = IconButton::new(("copy-message", index), IconName::Copy)
+            .icon_size(IconSize::XSmall)
+            .icon_color(Color::Muted)
+            .tooltip(Tooltip::text("Copy message"))
+            .on_click(cx.listener(move |this, _, _, cx| this.copy_user_message(index, cx)));
+        let history_actions =
+            user.uuid
+                .clone()
+                .filter(|_| !self.is_running(cx))
+                .map(|user_message_id| {
+                    h_flex()
+                        .gap_0p5()
+                        .child(
+                            IconButton::new(("fork", index), IconName::GitBranch)
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text("Fork conversation from here"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.fork_from(index, false, window, cx)
+                                })),
+                        )
+                        .child(
+                            IconButton::new(("rewind", index), IconName::RotateCcw)
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text("Rewind code to here"))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.rewind_code_to(user_message_id.clone(), cx)
+                                })),
+                        )
+                        .child(
+                            IconButton::new(("fork-rewind", index), IconName::GitBranchPlus)
+                                .icon_size(IconSize::XSmall)
+                                .icon_color(Color::Muted)
+                                .tooltip(Tooltip::text("Fork conversation and rewind code"))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.fork_from(index, true, window, cx)
+                                })),
+                        )
+                });
+        let actions = h_flex()
+            .justify_end()
+            .gap_0p5()
+            .visible_on_hover(group.clone())
+            .child(copy_button)
+            .children(history_actions);
         v_flex()
             .id(("user", index))
             .group(group)
@@ -1063,7 +1109,10 @@ impl ClaudeCodeView {
                     .border_1()
                     .border_color(colors.border)
                     .bg(colors.editor_background)
-                    .child(Label::new(text.to_string()))
+                    .child(MarkdownElement::new(
+                        text,
+                        message_markdown_style(window, cx),
+                    ))
                     .when(user.images > 0, |this| {
                         this.child(
                             h_flex()
@@ -1092,7 +1141,7 @@ impl ClaudeCodeView {
                         )
                     }),
             )
-            .children(actions)
+            .child(actions)
             .into_any_element()
     }
 
@@ -1158,13 +1207,14 @@ impl ClaudeCodeView {
     }
 
     fn render_tool_call(
-        &self,
+        &mut self,
         index: usize,
         call: &ToolCall,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let colors = cx.theme().colors();
-        let status_colors = cx.theme().status();
+        let input_text =
+            self.plain_text_for(index, PlainPart::ToolInput, &tool_input_text(call), cx);
         let expanded = !self.collapsed.contains(&index);
         let (dot, running) = match call.status {
             ToolStatus::Streaming | ToolStatus::Running => (Color::Accent, true),
@@ -1216,7 +1266,7 @@ impl ClaudeCodeView {
                 cx.notify();
             }));
         let full_output = self.full_output.contains(&index);
-        let output_text = call
+        let output = call
             .result
             .as_deref()
             .filter(|result| !result.trim().is_empty())
@@ -1233,7 +1283,16 @@ impl ClaudeCodeView {
                     !full_output && result.lines().count() > PREVIEW_OUTPUT_LINES,
                 )
             });
-        let block = |label: &'static str, text: String| {
+        let output_text = output.map(|(text, more)| {
+            (
+                self.plain_text_for(index, PlainPart::ToolOutput, &text, cx),
+                more,
+            )
+        });
+        let block_style = tool_block_markdown_style(window, cx);
+        let colors = cx.theme().colors();
+        let status_colors = cx.theme().status();
+        let block = |label: &'static str, text: Entity<Markdown>| {
             h_flex()
                 .items_start()
                 .gap_2()
@@ -1250,9 +1309,7 @@ impl ClaudeCodeView {
                     div()
                         .flex_1()
                         .min_w_0()
-                        .font_buffer(cx)
-                        .text_xs()
-                        .child(text),
+                        .child(MarkdownElement::new(text, block_style.clone())),
                 )
         };
         let body = v_flex()
@@ -1278,7 +1335,7 @@ impl ClaudeCodeView {
                             .child(div().min_w_0().child(line.to_string()))
                     }),
                 ),
-                None => this.child(block("IN", tool_input_text(call))),
+                None => this.child(block("IN", input_text)),
             })
             .when_some(output_text, |this, (output, more)| {
                 this.child(div().h_px().bg(colors.border_variant))
@@ -2383,6 +2440,25 @@ fn message_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
     style
 }
 
+/// Tool calls' input and output: the buffer font, small, as plain text.
+fn tool_block_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
+    let mut style = MarkdownStyle::themed(MarkdownFont::Editor, window, cx);
+    if let Some(family) = style.inline_code.font_family.clone() {
+        style.base_text_style.font_family = family;
+    }
+    let size = rems_from_px(12_f32);
+    style.base_text_style.font_size = size.into();
+    style.container_style.text.font_size = Some(size.into());
+    style
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum PlainPart {
+    Message,
+    ToolInput,
+    ToolOutput,
+}
+
 fn workspace_project(workspace: &Workspace) -> Entity<Project> {
     workspace.project().clone()
 }
@@ -3435,6 +3511,39 @@ mod tests {
         view.update(cx, |view, _| view.follow_tail = false);
         cx.run_until_parked();
         view.read_with(cx, |view, _| assert!(!view.shows_jump_to_bottom()));
+    }
+
+    #[gpui::test]
+    async fn your_messages_are_selectable_and_copied_as_typed(cx: &mut gpui::TestAppContext) {
+        let typed = "keep *this* as typed\n  indented line\n# not a heading";
+        let context = context_preamble(&EditorContext {
+            path: PathBuf::from("/p/a.rs"),
+            selection: None,
+        });
+        let mut conversation = crate::conversation::Conversation::default();
+        conversation.push_user_prompt(format!("{context}{typed}"), 0, Utc::now());
+        conversation.apply(
+            crate::protocol::CliMessage::parse(
+                r#"{"type":"assistant","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"echo *hi*"}}]}}"#,
+            )
+            .unwrap(),
+            Utc::now(),
+        );
+        let (view, cx) = view_in_tab(cx, conversation.entries).await;
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            // Drawn with the selectable element, from the text as typed: no
+            // context preamble, nothing read as Markdown.
+            let (_, message) = &view.plain_text[&(0, PlainPart::Message)];
+            assert_eq!(message.read(cx).source().as_ref(), typed);
+            let (_, input) = &view.plain_text[&(1, PlainPart::ToolInput)];
+            assert_eq!(input.read(cx).source().as_ref(), "echo *hi*");
+        });
+        view.update(cx, |view, cx| view.copy_user_message(0, cx));
+        assert_eq!(
+            cx.read_from_clipboard().and_then(|item| item.text()),
+            Some(typed.to_string())
+        );
     }
 
     #[gpui::test]
