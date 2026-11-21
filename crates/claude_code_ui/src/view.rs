@@ -469,6 +469,16 @@ impl ClaudeCodeView {
         }
     }
 
+    fn shows_jump_to_bottom(&self) -> bool {
+        !self.follow_tail && !self.is_scrolled_to_bottom()
+    }
+
+    fn jump_to_bottom(&mut self, cx: &mut Context<Self>) {
+        self.follow_tail = true;
+        self.scroll_handle.scroll_to_bottom();
+        cx.notify();
+    }
+
     fn ensure_spinner(&mut self, cx: &mut Context<Self>) {
         let running = self.is_running(cx);
         if !running {
@@ -2292,6 +2302,39 @@ impl ClaudeCodeView {
         .detach();
     }
 
+    fn render_jump_to_bottom(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if !self.shows_jump_to_bottom() {
+            return None;
+        }
+        let colors = cx.theme().colors();
+        Some(
+            h_flex()
+                .absolute()
+                .bottom_2()
+                .left_0()
+                .right_0()
+                .justify_center()
+                .child(
+                    div()
+                        .rounded_full()
+                        .border_1()
+                        .border_color(colors.border)
+                        .bg(colors.elevated_surface_background)
+                        .shadow_md()
+                        .overflow_hidden()
+                        .debug_selector(|| "jump-to-bottom".into())
+                        .child(
+                            IconButton::new("jump-to-bottom", IconName::ArrowDown)
+                                .shape(IconButtonShape::Square)
+                                .icon_size(IconSize::Small)
+                                .tooltip(Tooltip::text("Scroll to latest messages"))
+                                .on_click(cx.listener(|this, _, _, cx| this.jump_to_bottom(cx))),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     fn render_empty_state(&self, cx: &App) -> AnyElement {
         let session = self.session.read(cx);
         let settings = ClaudeCodeSettings::get_global(cx);
@@ -2363,6 +2406,7 @@ impl Render for ClaudeCodeView {
         self.update_follow_tail();
         let entries = self.render_entries(window, cx);
         let empty = entries.is_empty();
+        let jump_to_bottom = self.render_jump_to_bottom(cx);
         let colors = cx.theme().colors();
         let mut key_context = KeyContext::default();
         key_context.add("ClaudeCode");
@@ -2394,22 +2438,27 @@ impl Render for ClaudeCodeView {
             .on_action(cx.listener(Self::new_conversation_requested))
             .child(self.render_header(cx))
             .child(
-                div().relative().flex_1().min_h_0().child(
-                    div()
-                        .id("claude-messages")
-                        .size_full()
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll_handle)
-                        .on_scroll(cx.listener(|this, _, _, cx| {
-                            this.scrolled_by_user = true;
-                            cx.notify();
-                        }))
-                        .child(if empty {
-                            self.render_empty_state(cx)
-                        } else {
-                            v_flex().p_2().gap_2().children(entries).into_any_element()
-                        }),
-                ),
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h_0()
+                    .child(
+                        div()
+                            .id("claude-messages")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll_handle)
+                            .on_scroll(cx.listener(|this, _, _, cx| {
+                                this.scrolled_by_user = true;
+                                cx.notify();
+                            }))
+                            .child(if empty {
+                                self.render_empty_state(cx)
+                            } else {
+                                v_flex().p_2().gap_2().children(entries).into_any_element()
+                            }),
+                    )
+                    .children(jump_to_bottom),
             )
             .children(self.render_spinner(cx))
             .child(self.render_input(window, cx))
@@ -3325,6 +3374,7 @@ mod tests {
         assert_eq!(offset, max, "scrolled to the bottom");
         view.read_with(cx, |view, _| {
             assert!(view.follow_tail);
+            assert!(!view.shows_jump_to_bottom());
         });
 
         // New messages are followed.
@@ -3341,6 +3391,50 @@ mod tests {
         let (offset, new_max) = scroll_position(&view, cx);
         assert!(new_max > max);
         assert_eq!(offset, new_max);
+    }
+
+    #[gpui::test]
+    async fn the_jump_button_shows_while_scrolled_up(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, long_transcript()).await;
+        cx.run_until_parked();
+        // Scrolling up with the wheel stops following and shows the button.
+        let bounds = view.read_with(cx, |view, _| view.scroll_handle.bounds());
+        cx.simulate_event(gpui::ScrollEvent {
+            position: bounds.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(400.))),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        let (offset, max) = scroll_position(&view, cx);
+        assert!(offset < max);
+        view.read_with(cx, |view, _| {
+            assert!(!view.follow_tail);
+            assert!(view.shows_jump_to_bottom());
+        });
+
+        // Clicking it goes back to the bottom and follows again.
+        let button = cx
+            .debug_bounds("jump-to-bottom")
+            .expect("the jump button is drawn");
+        cx.simulate_click(button.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        let (offset, max) = scroll_position(&view, cx);
+        assert_eq!(offset, max);
+        view.read_with(cx, |view, _| {
+            assert!(view.follow_tail);
+            assert!(!view.shows_jump_to_bottom());
+        });
+    }
+
+    #[gpui::test]
+    async fn no_jump_button_when_the_list_fits(cx: &mut gpui::TestAppContext) {
+        let mut conversation = crate::conversation::Conversation::default();
+        conversation.push_user_prompt("short".into(), 0, Utc::now());
+        let (view, cx) = view_in_tab(cx, conversation.entries).await;
+        cx.run_until_parked();
+        view.update(cx, |view, _| view.follow_tail = false);
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| assert!(!view.shows_jump_to_bottom()));
     }
 
     #[gpui::test]
