@@ -1808,6 +1808,26 @@
       "enter": "claude_code::ConfirmOption",
     },
   },
+  {
+    "context": "ClaudeCodeQuestion",
+    "bindings": {
+      "up": "claude_code::SelectPreviousOption",
+      "down": "claude_code::SelectNextOption",
+      "enter": "claude_code::ConfirmOption",
+      "space": "claude_code::ConfirmOption",
+      "ctrl-enter": "claude_code::SubmitAnswers",
+      "escape": "claude_code::DismissQuestion",
+    },
+  },
+  {
+    "context": "ClaudeCodeQuestionOther > Editor",
+    "bindings": {
+      "up": "claude_code::SelectPreviousOption",
+      "down": "claude_code::SelectNextOption",
+      "enter": "claude_code::SubmitAnswers",
+      "ctrl-enter": "claude_code::SubmitAnswers",
+      "escape": "claude_code::DismissQuestion",
+    },
   },
   // Claude Code panel: shortcuts of the VS Code extension.
   {

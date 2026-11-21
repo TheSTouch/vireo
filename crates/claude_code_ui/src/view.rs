@@ -38,14 +38,21 @@ use crate::{
 gpui::actions!(
     claude_code,
     [
-        /// Moves the highlight of the permission card down.
+        /// Moves the highlight of the permission or question card down.
         SelectNextOption,
-        /// Moves the highlight of the permission card up.
+        /// Moves the highlight of the permission or question card up.
         SelectPreviousOption,
-        /// Chooses the highlighted option of the permission card.
+        /// Chooses the highlighted option of the permission or question card.
         ConfirmOption,
+        /// Sends the answers of Claude's question.
+        SubmitAnswers,
+        /// Dismisses Claude's question without answering it.
+        DismissQuestion,
     ]
 );
+
+const ASK_USER_QUESTION: &str = "AskUserQuestion";
+const DISMISSED_QUESTION: &str = "The user dismissed the question.";
 
 const SPINNER_INTERVAL: Duration = Duration::from_millis(2500);
 const MAX_OUTPUT_LINES: usize = 40;
@@ -130,11 +137,217 @@ pub struct ClaudeCodeView {
     card_request: Option<String>,
     /// The highlighted option of the permission card.
     card_selection: usize,
+    /// The answers being given when the pending request is AskUserQuestion.
+    question_form: Option<QuestionForm>,
     /// What the last answer to a permission request sent to the CLI.
     #[cfg(test)]
     last_decision: Option<Value>,
     _spinner: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
+}
+
+/// One question of an AskUserQuestion call.
+#[derive(Clone, Debug, PartialEq)]
+struct Question {
+    question: String,
+    header: String,
+    options: Vec<QuestionOption>,
+    multi_select: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct QuestionOption {
+    label: String,
+    description: String,
+}
+
+/// The input of AskUserQuestion: `questions[]` with `question`, `header`,
+/// `options[]` (`label`, `description`) and `multiSelect`.
+fn parse_questions(input: &Value) -> Vec<Question> {
+    let text = |value: &Value, key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    input
+        .get("questions")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|question| {
+            let options = question
+                .get("options")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|option| {
+                    Some(QuestionOption {
+                        label: option.get("label")?.as_str()?.to_string(),
+                        description: text(option, "description"),
+                    })
+                })
+                .collect();
+            Some(Question {
+                question: question.get("question")?.as_str()?.to_string(),
+                header: text(question, "header"),
+                options,
+                multi_select: question
+                    .get("multiSelect")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+/// The answers the CLI expects back in `updatedInput.answers`: the question's
+/// text to the chosen labels joined with ", ", with what was typed in
+/// "Other" in place of the word. None while a question has no answer.
+fn question_answers(
+    questions: &[Question],
+    chosen: &[std::collections::BTreeSet<usize>],
+    other: &[String],
+) -> Option<serde_json::Map<String, Value>> {
+    let mut answers = serde_json::Map::new();
+    for (index, question) in questions.iter().enumerate() {
+        let parts: Vec<&str> = chosen
+            .get(index)?
+            .iter()
+            .filter_map(|&option| match question.options.get(option) {
+                Some(option) => Some(option.label.as_str()),
+                None => other
+                    .get(index)
+                    .map(|text| text.trim())
+                    .filter(|text| !text.is_empty()),
+            })
+            .collect();
+        if parts.is_empty() {
+            return None;
+        }
+        answers.insert(question.question.clone(), Value::String(parts.join(", ")));
+    }
+    Some(answers)
+}
+
+struct QuestionForm {
+    request: PermissionRequest,
+    questions: Vec<Question>,
+    /// The chosen options of each question; `options.len()` stands for "Other".
+    chosen: Vec<std::collections::BTreeSet<usize>>,
+    other: Vec<Entity<Editor>>,
+    /// The highlighted row, counting every question's options and "Other".
+    cursor: usize,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl QuestionForm {
+    fn new(
+        request: PermissionRequest,
+        window: &mut Window,
+        cx: &mut Context<ClaudeCodeView>,
+    ) -> Self {
+        let questions = parse_questions(&request.request.input);
+        let mut subscriptions = Vec::new();
+        let other = questions
+            .iter()
+            .enumerate()
+            .map(|(index, _)| {
+                let editor = cx.new(|cx| {
+                    let mut editor = Editor::single_line(window, cx);
+                    editor.set_placeholder_text("Other…", window, cx);
+                    editor
+                });
+                subscriptions.push(cx.subscribe(&editor, move |this, editor, event, cx| {
+                    if matches!(event, EditorEvent::BufferEdited) {
+                        let typed = !editor.read(cx).text(cx).trim().is_empty();
+                        if let Some(form) = this.question_form.as_mut() {
+                            form.set_other_typed(index, typed);
+                        }
+                        cx.notify();
+                    }
+                }));
+                editor
+            })
+            .collect();
+        Self {
+            chosen: vec![Default::default(); questions.len()],
+            request,
+            questions,
+            other,
+            cursor: 0,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    /// Each row: its question and option, `options.len()` being "Other".
+    fn rows(&self) -> Vec<(usize, usize)> {
+        self.questions
+            .iter()
+            .enumerate()
+            .flat_map(|(question, item)| {
+                (0..=item.options.len()).map(move |option| (question, option))
+            })
+            .collect()
+    }
+
+    fn first_row_of(&self, question: usize) -> usize {
+        self.questions
+            .iter()
+            .take(question)
+            .map(|question| question.options.len() + 1)
+            .sum()
+    }
+
+    fn set_other_typed(&mut self, question: usize, typed: bool) {
+        let Some(item) = self.questions.get(question) else {
+            return;
+        };
+        let other = item.options.len();
+        let multi_select = item.multi_select;
+        let Some(chosen) = self.chosen.get_mut(question) else {
+            return;
+        };
+        if !typed {
+            chosen.remove(&other);
+        } else if multi_select {
+            chosen.insert(other);
+        } else {
+            chosen.clear();
+            chosen.insert(other);
+        }
+    }
+
+    /// Chooses an option: the only one of a single-choice question, toggled
+    /// in a multiple-choice one. Returns whether the question is single-choice.
+    fn choose(&mut self, question: usize, option: usize) -> bool {
+        let Some(item) = self.questions.get(question) else {
+            return false;
+        };
+        let multi_select = item.multi_select;
+        let Some(chosen) = self.chosen.get_mut(question) else {
+            return false;
+        };
+        if multi_select {
+            if !chosen.remove(&option) {
+                chosen.insert(option);
+            }
+        } else {
+            chosen.clear();
+            chosen.insert(option);
+        }
+        !multi_select
+    }
+
+    fn answers(&self, cx: &App) -> Option<serde_json::Map<String, Value>> {
+        let other: Vec<String> = self
+            .other
+            .iter()
+            .map(|editor| editor.read(cx).text(cx))
+            .collect();
+        question_answers(&self.questions, &self.chosen, &other)
+    }
 }
 
 impl EventEmitter<ViewEvent> for ClaudeCodeView {}
@@ -233,6 +446,7 @@ impl ClaudeCodeView {
             card_focus: cx.focus_handle(),
             card_request: None,
             card_selection: 0,
+            question_form: None,
             #[cfg(test)]
             last_decision: None,
             _spinner: None,
@@ -748,6 +962,10 @@ impl ClaudeCodeView {
                 updated_input: request.request.input.clone(),
                 updated_permissions: request.request.permission_suggestions.clone(),
             },
+            Answer::Dismiss(message) => PermissionDecision::Deny {
+                message,
+                interrupt: false,
+            },
             Answer::Deny(message) => {
                 let message = message.trim().to_string();
                 PermissionDecision::Deny {
@@ -873,15 +1091,17 @@ impl ClaudeCodeView {
     /// Starts the card afresh when the first pending request changes, and
     /// gives the focus back to the message box once nothing is pending.
     fn sync_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let active_id = self
-            .pending_permission(cx)
-            .map(|request| request.request_id);
+        let active = self.pending_permission(cx);
+        let active_id = active.as_ref().map(|request| request.request_id.clone());
         if active_id == self.card_request {
             return;
         }
         let card_had_focus = self.card_focus.contains_focused(window, cx);
         self.card_request = active_id;
         self.card_selection = 0;
+        self.question_form = active
+            .filter(|request| request.request.tool_name == ASK_USER_QUESTION)
+            .map(|request| QuestionForm::new(request, window, cx));
         if card_had_focus && self.card_request.is_none() {
             window.focus(&self.input.focus_handle(cx), cx);
         }
@@ -931,7 +1151,10 @@ impl ClaudeCodeView {
     }
 
     fn move_card_selection(&mut self, step: isize, cx: &mut Context<Self>) {
-        if let Some(request) = self.pending_permission(cx) {
+        if let Some(form) = self.question_form.as_mut() {
+            let count = form.rows().len().max(1) as isize;
+            form.cursor = (form.cursor as isize + step).rem_euclid(count) as usize;
+        } else if let Some(request) = self.pending_permission(cx) {
             let count = Self::permission_options(&request).len().max(1) as isize;
             self.card_selection = (self.card_selection as isize + step).rem_euclid(count) as usize;
         } else {
@@ -955,14 +1178,93 @@ impl ClaudeCodeView {
     }
 
     fn confirm_option(&mut self, _: &ConfirmOption, window: &mut Window, cx: &mut Context<Self>) {
-        if self.pending_permission(cx).is_some() {
+        if let Some(form) = self.question_form.as_ref() {
+            let Some((question, option)) = form.rows().get(form.cursor).copied() else {
+                return;
+            };
+            self.choose_question_option(question, option, window, cx);
+        } else if self.pending_permission(cx).is_some() {
             self.choose_permission_option(self.card_selection, window, cx);
         } else {
             cx.propagate();
         }
     }
 
-    /// Number keys choose an option of the permission card.
+    /// Chooses an option of a question, or goes to its "Other" field. After a
+    /// single choice the highlight moves on to the next question.
+    fn choose_question_option(
+        &mut self,
+        question: usize,
+        option: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.question_form.as_mut() else {
+            return;
+        };
+        let Some(item) = form.questions.get(question) else {
+            return;
+        };
+        if option >= item.options.len() {
+            form.cursor = form.first_row_of(question) + item.options.len();
+            if let Some(editor) = form.other.get(question) {
+                window.focus(&editor.focus_handle(cx), cx);
+            }
+            cx.notify();
+            return;
+        }
+        let single = form.choose(question, option);
+        form.cursor = if single && question + 1 < form.questions.len() {
+            form.first_row_of(question + 1)
+        } else {
+            form.first_row_of(question) + option
+        };
+        if single && let Some(editor) = form.other.get(question) {
+            editor.update(cx, |editor, cx| editor.clear(window, cx));
+        }
+        window.focus(&self.card_focus, cx);
+        cx.notify();
+    }
+
+    fn submit_answers(&mut self, _: &SubmitAnswers, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(form) = self.question_form.as_ref() else {
+            cx.propagate();
+            return;
+        };
+        let Some(answers) = form.answers(cx) else {
+            return;
+        };
+        let request = form.request.clone();
+        let mut input = request.request.input.clone();
+        if let Some(fields) = input.as_object_mut() {
+            fields.insert("answers".to_string(), Value::Object(answers));
+        }
+        self.answer_permission(&request, Answer::AllowWithInput(input), cx);
+        self.sync_card(window, cx);
+    }
+
+    fn dismiss_question(
+        &mut self,
+        _: &DismissQuestion,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(form) = self.question_form.as_ref() else {
+            cx.propagate();
+            return;
+        };
+        let request = form.request.clone();
+        self.answer_permission(
+            &request,
+            Answer::Dismiss(DISMISSED_QUESTION.to_string()),
+            cx,
+        );
+        self.sync_card(window, cx);
+    }
+
+    /// Number keys choose an option of the card: 1 to 3 on a permission card,
+    /// and on a question card the options of the highlighted question, the
+    /// one after the last being "Other".
     fn card_key_down(
         &mut self,
         event: &gpui::KeyDownEvent,
@@ -982,7 +1284,19 @@ impl ClaudeCodeView {
             return;
         };
         let option = number - 1;
-        if let Some(request) = self.pending_permission(cx)
+        if let Some(form) = self.question_form.as_ref() {
+            let Some((question, _)) = form.rows().get(form.cursor).copied() else {
+                return;
+            };
+            let options = form
+                .questions
+                .get(question)
+                .map_or(0, |item| item.options.len());
+            if option <= options {
+                cx.stop_propagation();
+                self.choose_question_option(question, option, window, cx);
+            }
+        } else if let Some(request) = self.pending_permission(cx)
             && option < Self::permission_options(&request).len()
         {
             cx.stop_propagation();
@@ -1575,6 +1889,13 @@ impl ClaudeCodeView {
             );
         }
         let active = self.card_request.as_deref() == Some(request.request_id.as_str());
+        if let Some(form) = self
+            .question_form
+            .as_ref()
+            .filter(|form| active && form.request.request_id == request.request_id)
+        {
+            return self.render_question_card(index, form, cx);
+        }
         let question = tool.title.clone().unwrap_or_else(|| {
             format!(
                 "Allow Claude to use {}?",
@@ -1657,6 +1978,156 @@ impl ClaudeCodeView {
                         .color(Color::Muted),
                 )
             })
+            .into_any_element()
+    }
+
+    /// AskUserQuestion: each question with its options, an "Other" field,
+    /// and one Submit for all of them.
+    fn render_question_card(
+        &self,
+        index: usize,
+        form: &QuestionForm,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let colors = cx.theme().colors();
+        let can_submit = form.answers(cx).is_some();
+        let questions =
+            form.questions
+                .iter()
+                .enumerate()
+                .map(|(question_index, question)| {
+                    let first_row = form.first_row_of(question_index);
+                    let chosen = form.chosen.get(question_index);
+                    let other_row = first_row + question.options.len();
+                    let other_number = question.options.len() + 1;
+                    v_flex()
+                        .gap_0p5()
+                        .child(
+                            h_flex()
+                                .gap_1p5()
+                                .when(!question.header.is_empty(), |this| {
+                                    this.child(
+                                        div()
+                                            .px_1()
+                                            .rounded_sm()
+                                            .bg(colors.element_background)
+                                            .child(
+                                                Label::new(question.header.clone())
+                                                    .size(LabelSize::XSmall)
+                                                    .color(Color::Muted),
+                                            ),
+                                    )
+                                })
+                                .child(
+                                    Label::new(question.question.clone())
+                                        .size(LabelSize::Small)
+                                        .weight(gpui::FontWeight::SEMIBOLD),
+                                ),
+                        )
+                        .when(question.multi_select, |this| {
+                            this.child(
+                                Label::new("Choose any that apply")
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted),
+                            )
+                        })
+                        .children(question.options.iter().enumerate().map(
+                            |(option_index, option)| {
+                                let row = first_row + option_index;
+                                option_row(
+                                    ("question-option", row),
+                                    option_index + 1,
+                                    Some(
+                                        chosen.is_some_and(|chosen| chosen.contains(&option_index)),
+                                    ),
+                                    option.label.clone(),
+                                    Some(option.description.clone())
+                                        .filter(|text| !text.is_empty()),
+                                    form.cursor == row,
+                                    cx,
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _, window, cx| {
+                                        this.choose_question_option(
+                                            question_index,
+                                            option_index,
+                                            window,
+                                            cx,
+                                        )
+                                    },
+                                ))
+                            },
+                        ))
+                        .children(form.other.get(question_index).map(|editor| {
+                            let other_chosen = chosen
+                                .is_some_and(|chosen| chosen.contains(&question.options.len()));
+                            h_flex()
+                                .id(("question-other", other_row))
+                                .gap_2()
+                                .px_2()
+                                .py_0p5()
+                                .rounded_sm()
+                                .when(form.cursor == other_row, |this| {
+                                    this.bg(colors.element_selected)
+                                })
+                                .child(option_marker(other_number, Some(other_chosen)))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .px_1()
+                                        .rounded_sm()
+                                        .border_1()
+                                        .border_color(colors.border_variant)
+                                        .bg(colors.editor_background)
+                                        .key_context("ClaudeCodeQuestionOther")
+                                        .child(editor.clone()),
+                                )
+                        }))
+                });
+        v_flex()
+            .id(("question", index))
+            .w_full()
+            .gap_2()
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(colors.border_focused)
+            .bg(colors.elevated_surface_background)
+            .key_context("ClaudeCodeQuestion")
+            .track_focus(&self.card_focus)
+            .on_key_down(cx.listener(Self::card_key_down))
+            .children(questions)
+            .child(
+                h_flex()
+                    .justify_between()
+                    .gap_1()
+                    .child(
+                        Label::new("↑↓ to select · Enter to choose · Esc to dismiss")
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child(
+                                Button::new(("dismiss-question", index), "Dismiss")
+                                    .style(ButtonStyle::Subtle)
+                                    .label_size(LabelSize::Small)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.dismiss_question(&DismissQuestion, window, cx)
+                                    })),
+                            )
+                            .child(
+                                Button::new(("submit-answers", index), "Submit")
+                                    .style(ButtonStyle::Filled)
+                                    .label_size(LabelSize::Small)
+                                    .disabled(!can_submit)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.submit_answers(&SubmitAnswers, window, cx)
+                                    })),
+                            ),
+                    ),
+            )
             .into_any_element()
     }
 
@@ -2611,6 +3082,8 @@ pub enum Answer {
     AllowAlways,
     /// No, with what the person typed, if anything, for Claude to do instead.
     Deny(String),
+    /// No, telling Claude exactly this, and letting the turn go on.
+    Dismiss(String),
 }
 
 impl Focusable for ClaudeCodeView {
@@ -2656,6 +3129,8 @@ impl Render for ClaudeCodeView {
             .on_action(cx.listener(Self::select_next_option))
             .on_action(cx.listener(Self::select_previous_option))
             .on_action(cx.listener(Self::confirm_option))
+            .on_action(cx.listener(Self::submit_answers))
+            .on_action(cx.listener(Self::dismiss_question))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::new_conversation_requested))
             .child(self.render_header(cx))
@@ -2747,8 +3222,8 @@ fn timeline_row(
         .into_any_element()
 }
 
-/// A numbered option of the permission card. `chosen`, when given, shows
-/// whether the option is checked.
+/// A numbered option of the permission or question card. `chosen` is None
+/// where options are picked once rather than checked.
 fn option_row(
     id: impl Into<ElementId>,
     number: usize,
@@ -3825,6 +4300,112 @@ mod tests {
                     .as_ref()
                     .and_then(|decision| decision.get("behavior")),
                 Some(&serde_json::json!("deny"))
+            );
+        });
+    }
+
+    const ASK_TWO_QUESTIONS: &str = r#"{"type":"control_request","request_id":"q1","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","input":{"questions":[{"question":"Which database?","header":"Database","multiSelect":false,"options":[{"label":"Postgres","description":"Relational"},{"label":"SQLite","description":"A file"}]},{"question":"Which extras?","header":"Extras","multiSelect":true,"options":[{"label":"Docker","description":""},{"label":"CI","description":"GitHub Actions"}]}]}}}"#;
+
+    #[test]
+    fn question_input_and_answers() {
+        let input: Value =
+            serde_json::from_str::<Value>(ASK_TWO_QUESTIONS).unwrap()["request"]["input"].clone();
+        let questions = parse_questions(&input);
+        assert_eq!(questions.len(), 2);
+        assert_eq!(questions[0].header, "Database");
+        assert_eq!(questions[0].options[1].description, "A file");
+        assert!(questions[1].multi_select);
+        let chosen = |options: &[usize]| {
+            options
+                .iter()
+                .copied()
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        assert_eq!(
+            question_answers(
+                &questions,
+                &[chosen(&[1]), chosen(&[0, 2])],
+                &[String::new(), " mine ".into()]
+            ),
+            serde_json::json!({"Which database?": "SQLite", "Which extras?": "Docker, mine"})
+                .as_object()
+                .cloned()
+        );
+        // A question left unanswered, or "Other" chosen with nothing typed.
+        assert_eq!(
+            question_answers(
+                &questions,
+                &[chosen(&[1]), chosen(&[])],
+                &[String::new(), String::new()]
+            ),
+            None
+        );
+        assert_eq!(
+            question_answers(
+                &questions,
+                &[chosen(&[1]), chosen(&[2])],
+                &[String::new(), "  ".into()]
+            ),
+            None
+        );
+    }
+
+    #[gpui::test]
+    async fn ask_user_question_is_answered_from_its_options(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        request_permission(&view, ASK_TWO_QUESTIONS, cx);
+        view.update_in(cx, |view, window, _| {
+            assert!(view.question_form.is_some());
+            assert!(view.card_focus.is_focused(window));
+        });
+        // "2" picks SQLite and moves on to the second question.
+        cx.simulate_keystrokes("2");
+        view.read_with(cx, |view, _| {
+            let form = view.question_form.as_ref().unwrap();
+            assert_eq!(form.chosen[0], [1].into_iter().collect());
+            assert_eq!(form.cursor, form.first_row_of(1));
+        });
+        // Enter checks Docker; "3" goes to the second question's Other field.
+        cx.simulate_keystrokes("enter 3");
+        cx.simulate_input("Kubernetes");
+        view.read_with(cx, |view, cx| {
+            let form = view.question_form.as_ref().unwrap();
+            assert_eq!(form.other[1].read(cx).text(cx), "Kubernetes");
+            assert_eq!(form.chosen[1], [0, 2].into_iter().collect());
+            assert!(view.last_decision.is_none());
+        });
+        cx.simulate_keystrokes("enter");
+        view.read_with(cx, |view, cx| {
+            let input: Value = serde_json::from_str::<Value>(ASK_TWO_QUESTIONS).unwrap()["request"]
+                ["input"]
+                .clone();
+            let mut expected = input;
+            expected["answers"] = serde_json::json!({
+                "Which database?": "SQLite",
+                "Which extras?": "Docker, Kubernetes",
+            });
+            assert_eq!(
+                view.last_decision,
+                Some(serde_json::json!({"behavior": "allow", "updatedInput": expected}))
+            );
+            assert!(view.question_form.is_none());
+            assert_eq!(
+                view.session
+                    .read(cx)
+                    .conversation
+                    .pending_permissions()
+                    .count(),
+                0
+            );
+        });
+
+        // Escape dismisses, telling Claude so, without interrupting the turn.
+        request_permission(&view, &ASK_TWO_QUESTIONS.replace("\"q1\"", "\"q2\""), cx);
+        cx.simulate_keystrokes("escape");
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.last_decision,
+                Some(serde_json::json!({"behavior": "deny", "message": DISMISSED_QUESTION}))
             );
         });
     }
