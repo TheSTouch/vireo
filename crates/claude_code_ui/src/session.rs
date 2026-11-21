@@ -1,8 +1,9 @@
 use std::collections::{HashMap, VecDeque};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context as _, Result, anyhow};
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, FixedOffset, Local, Utc};
 use futures::StreamExt as _;
 use futures::channel::{mpsc, oneshot};
 use gpui::{App, AppContext as _, Context, Entity, EventEmitter, Global, Task, WeakEntity};
@@ -27,6 +28,9 @@ pub const SDK_MCP_SERVER: &str = "vireo";
 const AUTOSAVE_HOOK_ID: &str = "vireo_autosave";
 const AUTOSAVE_TOOLS: &str = "Read|Edit|MultiEdit|Write|NotebookEdit";
 const MAX_LOG_LINES: usize = 5000;
+const LOG_FILE_NAME: &str = "claude-code.log";
+/// Like Zed's own log, the file is moved to `.old` once it reaches 1 MB.
+const LOG_FILE_MAX_BYTES: u64 = 1024 * 1024;
 /// Sent to resume a turn that a restart of the process interrupted.
 pub const CONTINUE_PROMPT: &str = "Continue from where you left off.";
 pub const CONTINUED_NOTICE: &str = "Claude Code restarted; continuing the interrupted step.";
@@ -37,21 +41,54 @@ type FakeSpawner = std::rc::Rc<
 >;
 
 /// The CLI's debug output and Vireo's own notes about the process, shown by
-/// "Show Logs".
+/// "Show Logs" and appended to claude-code.log in the logs folder.
 #[derive(Default)]
 pub struct ClaudeLogs {
     pub lines: VecDeque<String>,
+    file_writer: Option<mpsc::UnboundedSender<String>>,
 }
 
 impl Global for ClaudeLogs {}
 
 impl ClaudeLogs {
     pub fn push(line: impl Into<String>, cx: &mut App) {
+        Self::push_for_session(None, line, cx);
+    }
+
+    pub fn push_for_session(session_id: Option<&str>, line: impl Into<String>, cx: &mut App) {
+        let line = line.into();
+        let file_line = format_log_line(Local::now().fixed_offset(), session_id, &line);
+        let write_file = !cx.is_test();
+        let executor = cx.background_executor().clone();
         let logs = cx.default_global::<ClaudeLogs>();
         if logs.lines.len() >= MAX_LOG_LINES {
             logs.lines.pop_front();
         }
-        logs.lines.push_back(line.into());
+        logs.lines.push_back(line);
+        if !write_file {
+            return;
+        }
+        let writer = logs.file_writer.get_or_insert_with(|| {
+            let (sender, mut receiver) = mpsc::unbounded::<String>();
+            executor
+                .spawn(async move {
+                    let mut file =
+                        LogFile::new(paths::logs_dir().join(LOG_FILE_NAME), LOG_FILE_MAX_BYTES);
+                    while let Some(mut text) = receiver.next().await {
+                        while let Ok(more) = receiver.try_recv() {
+                            text.push_str(&more);
+                        }
+                        if let Err(error) = file.append(&text) {
+                            log::warn!("failed to write the Claude Code log: {error:#}");
+                        }
+                    }
+                })
+                .detach();
+            sender
+        });
+        if writer.unbounded_send(file_line).is_err() {
+            log::warn!("the Claude Code log writer has stopped");
+        }
     }
 
     pub fn text(cx: &App) -> String {
@@ -169,8 +206,7 @@ impl ClaudeSession {
                 "Claude Code is not installed. Install it with `npm install -g @anthropic-ai/claude-code` or from https://claude.com/claude-code, then reopen this panel.",
             )?;
         let command_line = build_command_line(&claude, options, std::env::var_os("PATH"));
-        ClaudeLogs::push(
-            format!(
+        self.log(format!(
                 "[vireo] starting {} {}",
                 command_line.program.display(),
                 command_line.args.join(" ")
@@ -182,6 +218,10 @@ impl ClaudeSession {
 
     pub fn session_id(&self) -> Option<&str> {
         self.conversation.session_id.as_deref()
+    }
+
+    fn log(&self, line: impl Into<String>, cx: &mut App) {
+        ClaudeLogs::push_for_session(self.session_id(), line, cx);
     }
 
     pub fn project(&self) -> Option<Entity<Project>> {
@@ -277,7 +317,7 @@ impl ClaudeSession {
                         this.initialize = Some(response);
                     }
                     Err(error) => {
-                        ClaudeLogs::push(format!("[vireo] initialize failed: {error:#}"), cx)
+                        this.log(format!("[vireo] initialize failed: {error:#}"), cx)
                     }
                 }
                 cx.emit(SessionEvent::Updated);
@@ -334,7 +374,7 @@ impl ClaudeSession {
                 .push_notice(NoticeKind::Error, message.clone(), Utc::now());
         }
         self.conversation.turn = crate::conversation::TurnState::Idle;
-        ClaudeLogs::push(format!("[vireo] {message}"), cx);
+        self.log(format!("[vireo] {message}"), cx);
         self.status = ProcessStatus::Exited(message);
         cx.emit(SessionEvent::Exited);
         if continue_turn {
@@ -357,7 +397,7 @@ impl ClaudeSession {
     pub fn continue_interrupted_turn(&mut self, cx: &mut Context<Self>) {
         self.conversation
             .push_notice(NoticeKind::Info, CONTINUED_NOTICE, Utc::now());
-        ClaudeLogs::push("[vireo] continuing the interrupted step", cx);
+        self.log("[vireo] continuing the interrupted step", cx);
         if let Err(error) = self.send_prompt(CONTINUE_PROMPT.to_string(), Vec::new(), cx) {
             log::warn!("failed to continue the Claude session: {error:#}");
         }
@@ -412,8 +452,8 @@ impl ClaudeSession {
                 cx.emit(SessionEvent::Updated);
                 cx.notify();
             }
-            ProcessEvent::Unparsed(line) => ClaudeLogs::push(format!("[stdout] {line}"), cx),
-            ProcessEvent::Stderr(line) => ClaudeLogs::push(line, cx),
+            ProcessEvent::Unparsed(line) => self.log(format!("[stdout] {line}"), cx),
+            ProcessEvent::Stderr(line) => self.log(line, cx),
             // pump_events ends on it and calls handle_exit.
             ProcessEvent::Exited(_) => {}
         }
@@ -708,6 +748,81 @@ impl Drop for ClaudeSession {
     }
 }
 
+/// One line of claude-code.log: when, which session ("-" before its id is
+/// known) and what.
+pub fn format_log_line(
+    timestamp: DateTime<FixedOffset>,
+    session_id: Option<&str>,
+    line: &str,
+) -> String {
+    format!(
+        "{} {} {}
+",
+        timestamp.format("%Y-%m-%dT%H:%M:%S%.3f%:z"),
+        session_id.unwrap_or("-"),
+        line
+    )
+}
+
+/// An append-only log file that is moved to `<name>.old`, replacing the
+/// previous one, before it would grow past `max_bytes`.
+pub struct LogFile {
+    path: PathBuf,
+    max_bytes: u64,
+    file: Option<std::fs::File>,
+    size: u64,
+}
+
+impl LogFile {
+    pub fn new(path: PathBuf, max_bytes: u64) -> Self {
+        Self {
+            path,
+            max_bytes,
+            file: None,
+            size: 0,
+        }
+    }
+
+    pub fn old_path(&self) -> PathBuf {
+        let mut name = self.path.as_os_str().to_owned();
+        name.push(".old");
+        PathBuf::from(name)
+    }
+
+    fn open(&mut self) -> Result<&mut std::fs::File> {
+        if self.file.is_none() {
+            if let Some(parent) = self.path.parent() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&self.path)
+                .with_context(|| format!("failed to open {}", self.path.display()))?;
+            self.size = file.metadata()?.len();
+            self.file = Some(file);
+        }
+        self.file
+            .as_mut()
+            .ok_or_else(|| anyhow!("the log file is not open"))
+    }
+
+    pub fn append(&mut self, text: &str) -> Result<()> {
+        self.open()?;
+        let length = text.len() as u64;
+        if self.size > 0 && self.size + length > self.max_bytes {
+            self.file = None;
+            std::fs::rename(&self.path, self.old_path())
+                .with_context(|| format!("failed to rotate {}", self.path.display()))?;
+            self.open()?;
+        }
+        self.open()?.write_all(text.as_bytes())?;
+        self.size += length;
+        Ok(())
+    }
+}
+
 pub fn save_dirty_buffer(project: &Entity<Project>, path: &Path, cx: &mut App) -> Task<Result<()>> {
     let buffer = project.read_with(cx, |project, cx| {
         let project_path = project.find_project_path(path, cx)?;
@@ -883,5 +998,52 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(launches.borrow().len(), 2);
         assert!(notices(&session, NoticeKind::Info, cx).is_empty());
+    }
+
+    #[test]
+    fn log_lines_carry_the_time_and_the_session() {
+        let timestamp = DateTime::parse_from_rfc3339("2026-11-21T09:05:03.250+01:00").unwrap();
+        assert_eq!(
+            format_log_line(timestamp, Some("s1"), "[vireo] starting claude"),
+            "2026-11-21T09:05:03.250+01:00 s1 [vireo] starting claude\n"
+        );
+        assert_eq!(
+            format_log_line(timestamp, None, "debug output"),
+            "2026-11-21T09:05:03.250+01:00 - debug output\n"
+        );
+    }
+
+    #[test]
+    fn the_log_file_rotates_to_old() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("logs").join(LOG_FILE_NAME);
+        let old_path = dir.path().join("logs").join("claude-code.log.old");
+        let read = |path: &Path| std::fs::read_to_string(path).unwrap();
+
+        let mut file = LogFile::new(path.clone(), 20);
+        assert_eq!(file.old_path(), old_path);
+        file.append("0123456789\n").unwrap();
+        file.append("abcdefgh\n").unwrap();
+        assert_eq!(read(&path), "0123456789\nabcdefgh\n");
+        assert!(!old_path.exists());
+
+        file.append("next\n").unwrap();
+        assert_eq!(read(&old_path), "0123456789\nabcdefgh\n");
+        assert_eq!(read(&path), "next\n");
+
+        // Only one .old file is kept, and a line longer than the limit is
+        // still written whole.
+        let long = format!("{}\n", "x".repeat(30));
+        file.append(&long).unwrap();
+        assert_eq!(read(&old_path), "next\n");
+        assert_eq!(read(&path), long);
+
+        // A new writer counts what the file already holds.
+        let mut reopened = LogFile::new(path.clone(), 40);
+        reopened.append("y\n").unwrap();
+        assert_eq!(read(&path), format!("{long}y\n"));
+        reopened.append("z".repeat(10).as_str()).unwrap();
+        assert_eq!(read(&old_path), format!("{long}y\n"));
+        assert_eq!(read(&path), "z".repeat(10));
     }
 }
