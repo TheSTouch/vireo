@@ -2093,7 +2093,7 @@
     "claude_process_wrapper": null,
     // Respect .gitignore files when searching files for @-mentions.
     "respect_git_ignore": true,
-    // Permission mode of new conversations: "default", "manual", "acceptEdits",
+    // Permission mode of new conversations: "auto", "default", "manual", "acceptEdits",
     // "plan" or "bypassPermissions". null defers to the Claude Code CLI.
     "initial_permission_mode": null,
     // Never prompt for login in the panel.

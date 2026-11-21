@@ -128,6 +128,7 @@ pub enum ClaudeCodePermissionMode {
     AcceptEdits,
     Plan,
     BypassPermissions,
+    Auto,
 }
 
 #[derive(

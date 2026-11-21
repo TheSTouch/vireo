@@ -584,25 +584,7 @@ impl ClaudeCodeView {
     }
 
     fn available_modes(&self, cx: &App) -> Vec<PermissionMode> {
-        let mut modes = vec![
-            PermissionMode::Default,
-            PermissionMode::AcceptEdits,
-            PermissionMode::Plan,
-        ];
-        let supports_auto = self
-            .session
-            .read(cx)
-            .initialize
-            .as_ref()
-            .is_some_and(|init| init.current_permission_mode.as_deref() == Some("auto"))
-            || self.session.read(cx).conversation.permission_mode == Some(PermissionMode::Auto);
-        if supports_auto {
-            modes.insert(0, PermissionMode::Auto);
-        }
-        if ClaudeCodeSettings::get_global(cx).allow_dangerously_skip_permissions {
-            modes.push(PermissionMode::BypassPermissions);
-        }
-        modes
+        available_modes(ClaudeCodeSettings::get_global(cx).allow_dangerously_skip_permissions)
     }
 
     fn pending_permission(&self, cx: &App) -> Option<PermissionRequest> {
@@ -2090,6 +2072,22 @@ fn id_hash(id: &ElementId) -> usize {
     hasher.finish() as usize
 }
 
+/// The modes the mode menu and Shift+Tab offer. Auto is always offered: the
+/// CLI does not say whether an account can use it until it is asked, and a
+/// conversation that did not start in Auto must still be able to switch to it.
+fn available_modes(allow_bypass_permissions: bool) -> Vec<PermissionMode> {
+    let mut modes = vec![
+        PermissionMode::Auto,
+        PermissionMode::Default,
+        PermissionMode::AcceptEdits,
+        PermissionMode::Plan,
+    ];
+    if allow_bypass_permissions {
+        modes.push(PermissionMode::BypassPermissions);
+    }
+    modes
+}
+
 fn mode_icon(mode: PermissionMode) -> IconName {
     match mode {
         PermissionMode::Auto => IconName::BoltFilled,
@@ -2260,6 +2258,24 @@ pub fn strip_context_preamble(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn auto_mode_is_always_offered() {
+        let modes = available_modes(false);
+        assert_eq!(
+            modes,
+            vec![
+                PermissionMode::Auto,
+                PermissionMode::Default,
+                PermissionMode::AcceptEdits,
+                PermissionMode::Plan,
+            ]
+        );
+        assert_eq!(
+            available_modes(true).last(),
+            Some(&PermissionMode::BypassPermissions)
+        );
+    }
 
     #[test]
     fn mentions_use_one_based_rows() {

@@ -284,6 +284,7 @@ impl VsCodeSettings {
                     "acceptEdits" => Some(ClaudeCodePermissionMode::AcceptEdits),
                     "plan" => Some(ClaudeCodePermissionMode::Plan),
                     "bypassPermissions" => Some(ClaudeCodePermissionMode::BypassPermissions),
+                    "auto" => Some(ClaudeCodePermissionMode::Auto),
                     _ => None,
                 }
             }),

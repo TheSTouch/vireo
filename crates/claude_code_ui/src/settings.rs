@@ -58,6 +58,7 @@ impl Settings for ClaudeCodeSettings {
                 ClaudeCodePermissionMode::AcceptEdits => PermissionMode::AcceptEdits,
                 ClaudeCodePermissionMode::Plan => PermissionMode::Plan,
                 ClaudeCodePermissionMode::BypassPermissions => PermissionMode::BypassPermissions,
+                ClaudeCodePermissionMode::Auto => PermissionMode::Auto,
             }),
             disable_login_prompt: claude.disable_login_prompt.unwrap_or(false),
             autosave: claude.autosave.unwrap_or(true),
