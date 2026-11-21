@@ -1785,6 +1785,16 @@
     },
   },
   {
+    "context": "ClaudeCodeInput > Editor && showing_commands",
+    "bindings": {
+      "up": "claude_code::SelectPreviousCommand",
+      "down": "claude_code::SelectNextCommand",
+      "enter": "claude_code::ConfirmCommand",
+      "tab": "claude_code::ConfirmCommand",
+      "escape": "claude_code::DismissCommands",
+    },
+  },
+  {
     "context": "ClaudeCodeDenyInput > Editor",
     "bindings": {
       "enter": "claude_code::DenyPermission",

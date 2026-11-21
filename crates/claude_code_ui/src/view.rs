@@ -28,9 +28,9 @@ use crate::protocol::{OutgoingControlRequest, PermissionDecision, PermissionMode
 use crate::session::{ClaudeSession, ProcessStatus, PromptImage, SessionEvent};
 use crate::settings::{ClaudeCodeSettings, spinner_verbs};
 use crate::{
-    AcceptSuggestion, AllowPermission, AllowPermissionAlways, BlurInput, CycleMode, DenyPermission,
-    FocusInput, FocusLastMessage, Interrupt, NewConversation, Send, ToggleFocusView,
-    ToggleThinking,
+    AcceptSuggestion, AllowPermission, AllowPermissionAlways, BlurInput, ConfirmCommand, CycleMode,
+    DenyPermission, DismissCommands, FocusInput, FocusLastMessage, Interrupt, NewConversation,
+    SelectNextCommand, SelectPreviousCommand, Send, ToggleFocusView, ToggleThinking,
 };
 
 const SPINNER_INTERVAL: Duration = Duration::from_millis(2500);
@@ -81,6 +81,11 @@ pub struct ClaudeCodeView {
     banner: Option<SharedString>,
     thinking_enabled: bool,
     follow_tail: bool,
+    /// The highlighted row of the "/" command list.
+    command_selection: usize,
+    /// Escape closed the "/" list; it reopens once the message stops being a command.
+    commands_dismissed: bool,
+    command_scroll: ScrollHandle,
     _spinner: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -125,6 +130,10 @@ impl ClaudeCodeView {
             cx.subscribe(&input, |this, _, event: &EditorEvent, cx| {
                 if matches!(event, EditorEvent::BufferEdited) {
                     this.refresh_placeholder_later(cx);
+                    this.command_selection = 0;
+                    if command_query(&this.input.read(cx).text(cx)).is_none() {
+                        this.commands_dismissed = false;
+                    }
                 }
             }),
             cx.observe_global::<settings::SettingsStore>(|this, cx| {
@@ -163,6 +172,9 @@ impl ClaudeCodeView {
             banner: None,
             thinking_enabled: true,
             follow_tail: true,
+            command_selection: 0,
+            commands_dismissed: false,
+            command_scroll: ScrollHandle::new(),
             _spinner: None,
             _subscriptions: subscriptions,
         };
@@ -1481,6 +1493,9 @@ impl ClaudeCodeView {
         {
             key_context.add("has_suggestion");
         }
+        if !self.visible_commands(cx).is_empty() {
+            key_context.add("showing_commands");
+        }
         let send_button = if running && self.input.read(cx).text(cx).trim().is_empty() {
             IconButton::new("stop", IconName::Stop)
                 .shape(IconButtonShape::Square)
@@ -1571,6 +1586,7 @@ impl ClaudeCodeView {
                 },
             )
             .children(self.render_chips(cx))
+            .children(self.render_command_list(cx))
             .child(
                 div()
                     .key_context(key_context)
@@ -1633,57 +1649,153 @@ impl ClaudeCodeView {
     }
 
     fn render_command_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let this = cx.weak_entity();
-        let commands = self
+        IconButton::new("commands", IconName::Slash)
+            .icon_size(IconSize::Small)
+            .tooltip(Tooltip::text("Commands"))
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.commands_dismissed = false;
+                this.command_selection = 0;
+                this.input.update(cx, |input, cx| {
+                    input.set_text("/", window, cx);
+                    input.move_to_end(&editor::actions::MoveToEnd, window, cx);
+                });
+                window.focus(&this.input.focus_handle(cx), cx);
+                cx.notify();
+            }))
+    }
+
+    /// The rows of the "/" list for what is typed, empty when it is closed.
+    fn visible_commands(&self, cx: &App) -> Vec<CommandEntry> {
+        if self.commands_dismissed {
+            return Vec::new();
+        }
+        let text = self.input.read(cx).text(cx);
+        let Some(query) = command_query(&text) else {
+            return Vec::new();
+        };
+        let slash_commands = self
             .session
             .read(cx)
             .initialize
             .as_ref()
-            .map(|init| init.commands.clone())
-            .unwrap_or_default();
-        PopoverMenu::new("command-menu")
-            .trigger_with_tooltip(
-                IconButton::new("commands", IconName::Slash).icon_size(IconSize::Small),
-                Tooltip::text("Commands"),
-            )
-            .anchor(gpui::Anchor::BottomLeft)
-            .menu(move |window, cx| {
-                let this = this.clone();
-                let commands = commands.clone();
-                Some(ContextMenu::build(window, cx, move |mut menu, _, _| {
-                    menu = menu
-                        .action("New conversation", NewConversation.boxed_clone())
-                        .action("Toggle focus view", ToggleFocusView.boxed_clone())
-                        .action("Toggle thinking", ToggleThinking.boxed_clone())
-                        .action("Past conversations", crate::ShowSessions.boxed_clone())
-                        .action("Show logs", crate::ShowLogs.boxed_clone());
-                    if !commands.is_empty() {
-                        menu = menu.separator().header("Slash commands");
-                    }
-                    for command in commands {
-                        let this = this.clone();
-                        let name = command.name.clone();
-                        let mut entry = ContextMenuEntry::new(format!("/{}", command.name));
-                        if !command.description.is_empty() {
-                            let description = command.description.clone();
-                            entry = entry
-                                .documentation_aside(ui::DocumentationSide::Right, move |_| {
-                                    Label::new(description.clone()).into_any_element()
-                                });
-                        }
-                        menu.push_item(entry.handler(move |window, cx| {
-                            this.update(cx, |this, cx| {
-                                this.input.update(cx, |input, cx| {
-                                    input.set_text(format!("/{name} "), window, cx);
-                                });
-                                window.focus(&this.input.focus_handle(cx), cx);
-                            })
-                            .ok();
-                        }));
-                    }
-                    menu
-                }))
+            .map(|init| {
+                init.commands
+                    .iter()
+                    .map(|command| (command.name.clone(), command.description.clone()))
+                    .collect::<Vec<_>>()
             })
+            .unwrap_or_default();
+        matching_commands(query, &slash_commands)
+    }
+
+    fn render_command_list(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let entries = self.visible_commands(cx);
+        let last = entries.len().checked_sub(1)?;
+        let selected = self.command_selection.min(last);
+        let colors = cx.theme().colors();
+        Some(
+            v_flex()
+                .id("command-list")
+                .mx_2()
+                .mt_1p5()
+                .py_0p5()
+                .max_h(px(COMMAND_LIST_MAX_HEIGHT))
+                .overflow_y_scroll()
+                .track_scroll(&self.command_scroll)
+                .rounded_sm()
+                .border_1()
+                .border_color(colors.border_variant)
+                .bg(colors.elevated_surface_background)
+                .children(entries.into_iter().enumerate().map(|(index, entry)| {
+                    let label = entry.label.clone();
+                    let description = entry.description.clone();
+                    h_flex()
+                        .id(("command", index))
+                        .px_2()
+                        .py_0p5()
+                        .gap_3()
+                        .cursor_pointer()
+                        .when(index == selected, |this| this.bg(colors.element_selected))
+                        .hover(|this| this.bg(colors.element_hover))
+                        .child(Label::new(label).size(LabelSize::Small))
+                        .child(
+                            Label::new(description)
+                                .size(LabelSize::XSmall)
+                                .color(Color::Muted)
+                                .truncate(),
+                        )
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.accept_command(entry.clone(), window, cx);
+                        }))
+                }))
+                .into_any_element(),
+        )
+    }
+
+    fn select_next_command(
+        &mut self,
+        _: &SelectNextCommand,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_command_selection(1, cx);
+    }
+
+    fn select_previous_command(
+        &mut self,
+        _: &SelectPreviousCommand,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_command_selection(-1, cx);
+    }
+
+    fn move_command_selection(&mut self, step: isize, cx: &mut Context<Self>) {
+        let count = self.visible_commands(cx).len();
+        if count == 0 {
+            cx.propagate();
+            return;
+        }
+        let current = self.command_selection.min(count - 1);
+        self.command_selection = (current as isize + step).rem_euclid(count as isize) as usize;
+        self.command_scroll.scroll_to_item(self.command_selection);
+        cx.notify();
+    }
+
+    fn confirm_command(&mut self, _: &ConfirmCommand, window: &mut Window, cx: &mut Context<Self>) {
+        let entries = self.visible_commands(cx);
+        let Some(entry) = entries
+            .get(self.command_selection.min(entries.len().saturating_sub(1)))
+            .cloned()
+        else {
+            cx.propagate();
+            return;
+        };
+        self.accept_command(entry, window, cx);
+    }
+
+    fn dismiss_commands(&mut self, _: &DismissCommands, _: &mut Window, cx: &mut Context<Self>) {
+        self.commands_dismissed = true;
+        cx.notify();
+    }
+
+    fn accept_command(&mut self, entry: CommandEntry, window: &mut Window, cx: &mut Context<Self>) {
+        self.command_selection = 0;
+        match entry.kind {
+            CommandKind::Slash(name) => {
+                self.input.update(cx, |input, cx| {
+                    input.set_text(format!("/{name} "), window, cx);
+                    input.move_to_end(&editor::actions::MoveToEnd, window, cx);
+                });
+                window.focus(&self.input.focus_handle(cx), cx);
+            }
+            CommandKind::Action(action) => {
+                self.input
+                    .update(cx, |input, cx| input.set_text("", window, cx));
+                window.dispatch_action(action(), cx);
+            }
+        }
+        cx.notify();
     }
 
     fn render_usage(&self, cx: &App) -> Option<AnyElement> {
@@ -1976,6 +2088,10 @@ impl Render for ClaudeCodeView {
             .on_action(cx.listener(Self::blur_input))
             .on_action(cx.listener(Self::focus_last_message))
             .on_action(cx.listener(Self::cycle_mode))
+            .on_action(cx.listener(Self::select_next_command))
+            .on_action(cx.listener(Self::select_previous_command))
+            .on_action(cx.listener(Self::confirm_command))
+            .on_action(cx.listener(Self::dismiss_commands))
             .on_action(cx.listener(Self::accept_suggestion))
             .on_action(cx.listener(Self::allow_permission))
             .on_action(cx.listener(Self::allow_permission_always))
@@ -2070,6 +2186,79 @@ fn id_hash(id: &ElementId) -> usize {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     id.to_string().hash(&mut hasher);
     hasher.finish() as usize
+}
+
+const COMMAND_LIST_MAX_HEIGHT: f32 = 240.;
+
+#[derive(Clone)]
+struct CommandEntry {
+    label: SharedString,
+    description: SharedString,
+    kind: CommandKind,
+}
+
+#[derive(Clone)]
+enum CommandKind {
+    /// A CLI slash command, inserted as `/name ` for the person to send.
+    Slash(String),
+    /// A panel action, run at once.
+    Action(fn() -> Box<dyn Action>),
+}
+
+/// What follows "/" while the message is a command being typed: it starts
+/// with "/" and has no space yet.
+fn command_query(text: &str) -> Option<&str> {
+    let query = text.strip_prefix('/')?;
+    (!query.contains(char::is_whitespace)).then_some(query)
+}
+
+/// Slash commands matching `query`, those starting with it first, then the
+/// panel's own actions whose name contains it.
+fn matching_commands(query: &str, slash_commands: &[(String, String)]) -> Vec<CommandEntry> {
+    let query = query.to_lowercase();
+    let mut starts = Vec::new();
+    let mut contains = Vec::new();
+    for (name, description) in slash_commands {
+        let lowercase = name.to_lowercase();
+        let entry = CommandEntry {
+            label: format!("/{name}").into(),
+            description: description.clone().into(),
+            kind: CommandKind::Slash(name.clone()),
+        };
+        if lowercase.starts_with(&query) {
+            starts.push(entry);
+        } else if lowercase.contains(&query) {
+            contains.push(entry);
+        }
+    }
+    let panel_actions: [(&str, &str, fn() -> Box<dyn Action>); 5] = [
+        ("New conversation", "Start over in this view", || {
+            NewConversation.boxed_clone()
+        }),
+        ("Past conversations", "Resume an earlier session", || {
+            crate::ShowSessions.boxed_clone()
+        }),
+        ("Toggle focus view", "Show only prompts and replies", || {
+            ToggleFocusView.boxed_clone()
+        }),
+        (
+            "Toggle thinking",
+            "Turn extended thinking on or off",
+            || ToggleThinking.boxed_clone(),
+        ),
+        ("Show logs", "Open the Claude Code logs", || {
+            crate::ShowLogs.boxed_clone()
+        }),
+    ];
+    let actions = panel_actions
+        .into_iter()
+        .filter(|(label, _, _)| label.to_lowercase().contains(&query))
+        .map(|(label, description, action)| CommandEntry {
+            label: label.into(),
+            description: description.into(),
+            kind: CommandKind::Action(action),
+        });
+    starts.into_iter().chain(contains).chain(actions).collect()
 }
 
 /// The modes the mode menu and Shift+Tab offer. Auto is always offered: the
@@ -2258,6 +2447,46 @@ pub fn strip_context_preamble(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn slash_opens_the_command_list() {
+        assert_eq!(command_query("/"), Some(""));
+        assert_eq!(command_query("/com"), Some("com"));
+        assert_eq!(command_query("/compact now"), None);
+        assert_eq!(command_query("hello /x"), None);
+
+        let commands = vec![
+            ("review".to_string(), "Review a PR".to_string()),
+            ("compact".to_string(), "Compact the context".to_string()),
+            ("pr-comments".to_string(), String::new()),
+        ];
+        let labels = |query: &str| {
+            matching_commands(query, &commands)
+                .into_iter()
+                .map(|entry| entry.label.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels("")[..3],
+            ["/review", "/compact", "/pr-comments"].map(String::from)
+        );
+        assert_eq!(labels("").len(), 3 + 5);
+        assert_eq!(
+            labels("co"),
+            [
+                "/compact",
+                "/pr-comments",
+                "New conversation",
+                "Past conversations"
+            ]
+            .map(String::from)
+        );
+        assert_eq!(
+            labels("CONV"),
+            ["New conversation", "Past conversations"].map(String::from)
+        );
+        assert!(labels("zzz").is_empty());
+    }
 
     #[test]
     fn auto_mode_is_always_offered() {

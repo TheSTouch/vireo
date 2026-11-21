@@ -73,6 +73,14 @@ actions!(
         RejectProposedHunk,
         /// Inserts an @-mention of the editor selection into the message box.
         InsertAtMention,
+        /// Selects the next command in the list opened by typing "/".
+        SelectNextCommand,
+        /// Selects the previous command in the list opened by typing "/".
+        SelectPreviousCommand,
+        /// Runs or inserts the selected command of the "/" list.
+        ConfirmCommand,
+        /// Closes the "/" command list.
+        DismissCommands,
         /// Sends an @-mention of the editor selection to a `claude` connected from a terminal.
         InsertAtMentioned,
         /// Adds the active file to the conversation.
