@@ -54,6 +54,14 @@ gpui::actions!(
 const ASK_USER_QUESTION: &str = "AskUserQuestion";
 const DISMISSED_QUESTION: &str = "The user dismissed the question.";
 
+/// The sizes of the extension's buttons (2.1.330), compared by the drawn
+/// glyph rather than the box: its header icons are 20 px boxes whose glyph
+/// fills 15 px, the 12/16 of a Codicon drawn at 20 px; its send arrow
+/// fills 14 px of 20. Its buttons are 26 to 28 px.
+// In rems of 16 px, as rems_from_px is not const.
+const HEADER_ICON_SIZE: IconSize = IconSize::Custom(gpui::rems(20. / 16.));
+const SEND_ICON_SIZE: IconSize = IconSize::Custom(gpui::rems(18. / 16.));
+
 const SPINNER_INTERVAL: Duration = Duration::from_millis(2500);
 const MAX_OUTPUT_LINES: usize = 40;
 /// Output lines a tool call shows before it is opened in full: enough to
@@ -2147,7 +2155,8 @@ impl ClaudeCodeView {
                     .gap_0p5()
                     .child(
                         IconButton::new("focus-view", IconName::Eye)
-                            .icon_size(IconSize::Small)
+                            .icon_size(HEADER_ICON_SIZE)
+                            .size(ButtonSize::Medium)
                             .toggle_state(self.focus_view)
                             .tooltip(move |_, cx| {
                                 Tooltip::for_action("Toggle Focus View", &ToggleFocusView, cx)
@@ -2158,7 +2167,8 @@ impl ClaudeCodeView {
                     )
                     .child(
                         IconButton::new("sessions", IconName::HistoryRerun)
-                            .icon_size(IconSize::Small)
+                            .icon_size(HEADER_ICON_SIZE)
+                            .size(ButtonSize::Medium)
                             .tooltip(move |_, cx| {
                                 Tooltip::for_action("Past Conversations", &crate::ShowSessions, cx)
                             })
@@ -2168,7 +2178,8 @@ impl ClaudeCodeView {
                     )
                     .child(
                         IconButton::new("new-conversation", IconName::Plus)
-                            .icon_size(IconSize::Small)
+                            .icon_size(HEADER_ICON_SIZE)
+                            .size(ButtonSize::Medium)
                             .tooltip(move |_, cx| {
                                 Tooltip::for_action("New Conversation", &NewConversation, cx)
                             })
@@ -2311,6 +2322,8 @@ impl ClaudeCodeView {
         let send_button = if running && self.input.read(cx).text(cx).trim().is_empty() {
             IconButton::new("stop", IconName::Stop)
                 .shape(IconButtonShape::Square)
+                .icon_size(IconSize::Medium)
+                .size(ButtonSize::Medium)
                 .style(ButtonStyle::Filled)
                 .icon_color(Color::Error)
                 .tooltip(move |_, cx| Tooltip::for_action("Stop", &Interrupt, cx))
@@ -2318,6 +2331,8 @@ impl ClaudeCodeView {
         } else {
             IconButton::new("send", IconName::ArrowUp)
                 .shape(IconButtonShape::Square)
+                .icon_size(SEND_ICON_SIZE)
+                .size(ButtonSize::Medium)
                 .style(ButtonStyle::Filled)
                 .icon_color(Color::Accent)
                 .tooltip(move |_, cx| Tooltip::for_action("Send", &Send, cx))
@@ -2432,7 +2447,9 @@ impl ClaudeCodeView {
         let this = cx.weak_entity();
         PopoverMenu::new("attach-menu")
             .trigger_with_tooltip(
-                IconButton::new("attach", IconName::Plus).icon_size(IconSize::Small),
+                IconButton::new("attach", IconName::Plus)
+                    .icon_size(IconSize::Medium)
+                    .size(ButtonSize::Medium),
                 Tooltip::text("Add context"),
             )
             .anchor(gpui::Anchor::BottomLeft)
@@ -2462,7 +2479,8 @@ impl ClaudeCodeView {
 
     fn render_command_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
         IconButton::new("commands", IconName::Slash)
-            .icon_size(IconSize::Small)
+            .icon_size(IconSize::Medium)
+            .size(ButtonSize::Medium)
             .tooltip(Tooltip::text("Commands"))
             .on_click(cx.listener(|this, _, window, cx| {
                 this.commands_dismissed = false;
