@@ -19,7 +19,6 @@ use crate::view::{ClaudeCodeView, ViewEvent};
 use crate::{NewConversation, ToggleFocus};
 
 const PANEL_KEY: &str = "ClaudeCodePanel";
-const CONTINUE_PROMPT: &str = "Continue from where you left off.";
 
 /// The directory Claude runs in: the first folder of the workspace.
 pub fn workspace_cwd(project: &Entity<Project>, cx: &App) -> PathBuf {
@@ -123,13 +122,11 @@ impl ClaudeCodePanel {
         if let Some(saved) = &saved
             && saved.interrupted
             && !saved.plan_mode
-            && ClaudeCodeSettings::get_global(cx).continue_after_reload
         {
             let session = view.read(cx).session.clone();
             session.update(cx, |session, cx| {
-                if let Err(error) = session.send_prompt(CONTINUE_PROMPT.to_string(), Vec::new(), cx)
-                {
-                    log::warn!("failed to continue the Claude session: {error:#}");
+                if session.may_continue(cx) {
+                    session.continue_interrupted_turn(cx);
                 }
             });
         }

@@ -215,7 +215,8 @@ pub enum ProcessEvent {
 /// A running `claude` process. Dropping it kills the process.
 pub struct ClaudeProcess {
     stdin: mpsc::UnboundedSender<String>,
-    child: Child,
+    /// None for the fake process of tests.
+    child: Option<Child>,
     _io: Task<()>,
 }
 
@@ -279,6 +280,10 @@ impl ClaudeProcess {
                                 break;
                             }
                         }
+                        // The events channel stays open while stdin is, so
+                        // without this the session would only notice that the
+                        // process died on its next write.
+                        events_tx.unbounded_send(ProcessEvent::Exited(None)).ok();
                     }
                 };
                 let read_stderr = {
@@ -314,11 +319,31 @@ impl ClaudeProcess {
         Ok((
             Self {
                 stdin: stdin_tx,
-                child,
+                child: Some(child),
                 _io: io,
             },
             events_rx,
         ))
+    }
+
+    /// A process that runs nothing: the test sends its events and reads what
+    /// the session writes to its stdin. Dropping the events sender is the
+    /// process exiting.
+    #[cfg(test)]
+    pub fn fake() -> (
+        Self,
+        mpsc::UnboundedReceiver<ProcessEvent>,
+        mpsc::UnboundedSender<ProcessEvent>,
+        mpsc::UnboundedReceiver<String>,
+    ) {
+        let (events_tx, events_rx) = mpsc::unbounded();
+        let (stdin_tx, stdin_rx) = mpsc::unbounded();
+        let process = Self {
+            stdin: stdin_tx,
+            child: None,
+            _io: Task::ready(()),
+        };
+        (process, events_rx, events_tx, stdin_rx)
     }
 
     pub fn send(&self, message: &StdinMessage) -> Result<()> {
@@ -328,13 +353,14 @@ impl ClaudeProcess {
             .map_err(|_| anyhow!("Claude Code is no longer running"))
     }
 
-    pub fn pid(&self) -> u32 {
-        self.child.id()
+    pub fn pid(&self) -> Option<u32> {
+        self.child.as_ref().map(|child| child.id())
     }
 
     /// Returns the exit code once the process has ended.
     pub fn try_exit_status(&mut self) -> Option<Option<i32>> {
-        match self.child.try_status() {
+        let child = self.child.as_mut()?;
+        match child.try_status() {
             Ok(Some(status)) => Some(status.code()),
             Ok(None) => None,
             Err(error) => {
@@ -345,7 +371,10 @@ impl ClaudeProcess {
     }
 
     pub fn kill(&mut self) {
-        if let Err(error) = self.child.kill() {
+        let Some(child) = self.child.as_mut() else {
+            return;
+        };
+        if let Err(error) = child.kill() {
             log::debug!("failed to kill claude: {error}");
         }
     }

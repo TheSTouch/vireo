@@ -27,6 +27,14 @@ pub const SDK_MCP_SERVER: &str = "vireo";
 const AUTOSAVE_HOOK_ID: &str = "vireo_autosave";
 const AUTOSAVE_TOOLS: &str = "Read|Edit|MultiEdit|Write|NotebookEdit";
 const MAX_LOG_LINES: usize = 5000;
+/// Sent to resume a turn that a restart of the process interrupted.
+pub const CONTINUE_PROMPT: &str = "Continue from where you left off.";
+pub const CONTINUED_NOTICE: &str = "Claude Code restarted; continuing the interrupted step.";
+
+#[cfg(test)]
+type FakeSpawner = std::rc::Rc<
+    dyn Fn(&LaunchOptions) -> (ClaudeProcess, mpsc::UnboundedReceiver<ProcessEvent>),
+>;
 
 /// The CLI's debug output and Vireo's own notes about the process, shown by
 /// "Show Logs".
@@ -89,6 +97,16 @@ pub struct ClaudeSession {
     resume_session_at: Option<String>,
     model: Option<String>,
     ide: Option<WeakEntity<claude_ide::ClaudeIde>>,
+    /// Counts the processes started, so that the end of one that was
+    /// replaced is not taken for the end of the current one.
+    process_generation: u64,
+    /// Whether Claude has answered at all in the current turn: a turn that
+    /// was cut short after that is continued when the process restarts, one
+    /// that never got going is not, so a process that keeps failing is not
+    /// restarted over and over.
+    turn_progressed: bool,
+    #[cfg(test)]
+    fake_spawner: Option<FakeSpawner>,
     _events: Option<Task<()>>,
 }
 
@@ -119,8 +137,47 @@ impl ClaudeSession {
             resume_session_at: None,
             model: None,
             ide: None,
+            process_generation: 0,
+            turn_progressed: false,
+            #[cfg(test)]
+            fake_spawner: None,
             _events: None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn set_fake_spawner(&mut self, spawner: FakeSpawner) {
+        self.fake_spawner = Some(spawner);
+    }
+
+    fn spawn_process(
+        &self,
+        options: &LaunchOptions,
+        cx: &mut Context<Self>,
+    ) -> Result<(ClaudeProcess, mpsc::UnboundedReceiver<ProcessEvent>)> {
+        #[cfg(test)]
+        {
+            if let Some(spawner) = &self.fake_spawner {
+                return Ok(spawner(options));
+            }
+        }
+        if cx.is_test() {
+            anyhow::bail!("tests run Claude Code with a fake process");
+        }
+        let claude = find_claude(paths::home_dir().as_path().into(), std::env::var_os("PATH"))
+            .context(
+                "Claude Code is not installed. Install it with `npm install -g @anthropic-ai/claude-code` or from https://claude.com/claude-code, then reopen this panel.",
+            )?;
+        let command_line = build_command_line(&claude, options, std::env::var_os("PATH"));
+        ClaudeLogs::push(
+            format!(
+                "[vireo] starting {} {}",
+                command_line.program.display(),
+                command_line.args.join(" ")
+            ),
+            cx,
+        );
+        ClaudeProcess::spawn(&command_line, cx.background_executor())
     }
 
     pub fn session_id(&self) -> Option<&str> {
@@ -179,27 +236,16 @@ impl ClaudeSession {
         if self.process.is_some() {
             return Ok(());
         }
-        let claude = find_claude(paths::home_dir().as_path().into(), std::env::var_os("PATH"))
-            .context(
-                "Claude Code is not installed. Install it with `npm install -g @anthropic-ai/claude-code` or from https://claude.com/claude-code, then reopen this panel.",
-            )?;
         let options = self.launch_options(cx);
-        let command_line = build_command_line(&claude, &options, std::env::var_os("PATH"));
-        ClaudeLogs::push(
-            format!(
-                "[vireo] starting {} {}",
-                command_line.program.display(),
-                command_line.args.join(" ")
-            ),
-            cx,
-        );
-        let (process, events) = ClaudeProcess::spawn(&command_line, cx.background_executor())?;
+        let (process, events) = self.spawn_process(&options, cx)?;
         self.process = Some(process);
+        self.process_generation += 1;
+        let generation = self.process_generation;
         self.status = ProcessStatus::Running;
         self.fork_session = false;
         self.resume_session_at = None;
         self._events = Some(cx.spawn(async move |this, cx| {
-            Self::pump_events(this, events, cx).await;
+            Self::pump_events(this, generation, events, cx).await;
         }));
 
         let settings = ClaudeCodeSettings::get_global(cx);
@@ -244,19 +290,27 @@ impl ClaudeSession {
 
     async fn pump_events(
         this: WeakEntity<Self>,
+        generation: u64,
         mut events: mpsc::UnboundedReceiver<ProcessEvent>,
         cx: &mut gpui::AsyncApp,
     ) {
         while let Some(event) = events.next().await {
+            if matches!(event, ProcessEvent::Exited(_)) {
+                break;
+            }
             let result = this.update(cx, |this, cx| this.handle_process_event(event, cx));
             if result.is_err() {
                 return;
             }
         }
-        this.update(cx, |this, cx| this.handle_exit(cx)).ok();
+        this.update(cx, |this, cx| this.handle_exit(generation, cx))
+            .ok();
     }
 
-    fn handle_exit(&mut self, cx: &mut Context<Self>) {
+    fn handle_exit(&mut self, generation: u64, cx: &mut Context<Self>) {
+        if generation != self.process_generation || self.process.is_none() {
+            return;
+        }
         let code = self
             .process
             .as_mut()
@@ -274,7 +328,8 @@ impl ClaudeSession {
             }
         };
         let was_busy = self.conversation.turn != crate::conversation::TurnState::Idle;
-        if was_busy || !matches!(code, Some(0) | None) {
+        let continue_turn = was_busy && self.turn_progressed && self.may_continue(cx);
+        if !continue_turn && (was_busy || !matches!(code, Some(0) | None)) {
             self.conversation
                 .push_notice(NoticeKind::Error, message.clone(), Utc::now());
         }
@@ -282,7 +337,30 @@ impl ClaudeSession {
         ClaudeLogs::push(format!("[vireo] {message}"), cx);
         self.status = ProcessStatus::Exited(message);
         cx.emit(SessionEvent::Exited);
+        if continue_turn {
+            self.continue_interrupted_turn(cx);
+        }
         cx.notify();
+    }
+
+    /// Whether a turn the process left unfinished may be continued on its
+    /// own: plan mode waits for the person, and without a session id there is
+    /// nothing to resume.
+    pub fn may_continue(&self, cx: &App) -> bool {
+        ClaudeCodeSettings::get_global(cx).continue_after_reload
+            && self.conversation.permission_mode != Some(PermissionMode::Plan)
+            && self.session_id().is_some()
+    }
+
+    /// Restarts the process on the session and asks Claude to go on with the
+    /// step that was interrupted.
+    pub fn continue_interrupted_turn(&mut self, cx: &mut Context<Self>) {
+        self.conversation
+            .push_notice(NoticeKind::Info, CONTINUED_NOTICE, Utc::now());
+        ClaudeLogs::push("[vireo] continuing the interrupted step", cx);
+        if let Err(error) = self.send_prompt(CONTINUE_PROMPT.to_string(), Vec::new(), cx) {
+            log::warn!("failed to continue the Claude session: {error:#}");
+        }
     }
 
     fn handle_process_event(&mut self, event: ProcessEvent, cx: &mut Context<Self>) {
@@ -302,6 +380,14 @@ impl ClaudeSession {
             }
             ProcessEvent::Message(message) => {
                 let was_busy = self.conversation.turn != crate::conversation::TurnState::Idle;
+                if was_busy
+                    && matches!(
+                        message,
+                        CliMessage::Assistant(_) | CliMessage::StreamEvent(_)
+                    )
+                {
+                    self.turn_progressed = true;
+                }
                 let permission_request_id = match &message {
                     CliMessage::ControlRequest(request)
                         if matches!(
@@ -328,7 +414,8 @@ impl ClaudeSession {
             }
             ProcessEvent::Unparsed(line) => ClaudeLogs::push(format!("[stdout] {line}"), cx),
             ProcessEvent::Stderr(line) => ClaudeLogs::push(line, cx),
-            ProcessEvent::Exited(_) => self.handle_exit(cx),
+            // pump_events ends on it and calls handle_exit.
+            ProcessEvent::Exited(_) => {}
         }
     }
 
@@ -514,6 +601,9 @@ impl ClaudeSession {
             content.push(ContentBlock::Text { text: text.clone() });
         }
         self.send(&StdinMessage::user(self.session_id(), content))?;
+        if self.conversation.turn == crate::conversation::TurnState::Idle {
+            self.turn_progressed = false;
+        }
         self.conversation
             .push_user_prompt(text, images.len(), Utc::now());
         self.last_activity = Utc::now();
@@ -630,4 +720,168 @@ pub fn save_dirty_buffer(project: &Entity<Project>, path: &Path, cx: &mut App) -
         return Task::ready(Ok(()));
     }
     project.update(cx, |project, cx| project.save_buffer(buffer, cx))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::conversation::{Entry, TurnState};
+    use gpui::{BorrowAppContext as _, TestAppContext};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct FakeLaunch {
+        options: LaunchOptions,
+        events: Option<mpsc::UnboundedSender<ProcessEvent>>,
+        stdin: mpsc::UnboundedReceiver<String>,
+    }
+
+    impl FakeLaunch {
+        fn send(&self, line: &str) {
+            let message = CliMessage::parse(line).expect("valid protocol line");
+            self.events
+                .as_ref()
+                .expect("the process is running")
+                .unbounded_send(ProcessEvent::Message(message))
+                .expect("the session reads events");
+        }
+
+        fn exit(&mut self) {
+            if let Some(events) = self.events.take() {
+                events.unbounded_send(ProcessEvent::Exited(Some(143))).ok();
+            }
+        }
+
+        fn prompts(&mut self) -> Vec<String> {
+            let mut prompts = Vec::new();
+            while let Ok(line) = self.stdin.try_recv() {
+                if line.contains(r#""type":"user""#) {
+                    prompts.push(line);
+                }
+            }
+            prompts
+        }
+    }
+
+    fn fake_session(
+        cx: &mut TestAppContext,
+    ) -> (Entity<ClaudeSession>, Rc<RefCell<Vec<FakeLaunch>>>) {
+        cx.update(|cx| {
+            let store = settings::SettingsStore::test(cx);
+            cx.set_global(store);
+            ClaudeCodeSettings::register(cx);
+        });
+        let launches = Rc::new(RefCell::new(Vec::<FakeLaunch>::new()));
+        let session = cx.new(|cx| {
+            let mut session =
+                ClaudeSession::new(WeakEntity::new_invalid(), PathBuf::from("/p"), None, cx);
+            let launches = launches.clone();
+            session.set_fake_spawner(Rc::new(move |options| {
+                let (process, events_rx, events_tx, stdin) = ClaudeProcess::fake();
+                launches.borrow_mut().push(FakeLaunch {
+                    options: options.clone(),
+                    events: Some(events_tx),
+                    stdin,
+                });
+                (process, events_rx)
+            }));
+            session
+        });
+        (session, launches)
+    }
+
+    const INIT: &str = r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus-5-5","slash_commands":[]}"#;
+    const TOOL_CALL: &str = r#"{"type":"assistant","session_id":"s1","message":{"id":"m1","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"sleep 120"}}]}}"#;
+
+    fn notices(session: &Entity<ClaudeSession>, kind: NoticeKind, cx: &TestAppContext) -> Vec<String> {
+        session.read_with(cx, |session, _| {
+            session
+                .conversation
+                .entries
+                .iter()
+                .filter_map(|entry| match entry {
+                    Entry::Notice(notice) if notice.kind == kind => Some(notice.text.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
+    }
+
+    #[gpui::test]
+    async fn a_restarted_process_continues_the_interrupted_turn_once(cx: &mut TestAppContext) {
+        let (session, launches) = fake_session(cx);
+        session.update(cx, |session, cx| {
+            session
+                .send_prompt("run sleep 120".into(), Vec::new(), cx)
+                .unwrap()
+        });
+        launches.borrow()[0].send(INIT);
+        launches.borrow()[0].send(TOOL_CALL);
+        cx.run_until_parked();
+        assert_eq!(launches.borrow_mut()[0].prompts().len(), 1);
+
+        // The process is killed during the tool call.
+        launches.borrow_mut()[0].exit();
+        cx.run_until_parked();
+        assert_eq!(launches.borrow().len(), 2, "the process is restarted");
+        assert_eq!(launches.borrow()[1].options.resume.as_deref(), Some("s1"));
+        let prompts = launches.borrow_mut()[1].prompts();
+        assert_eq!(prompts.len(), 1, "{prompts:?}");
+        assert!(prompts[0].contains(CONTINUE_PROMPT));
+        assert_eq!(notices(&session, NoticeKind::Info, cx), [CONTINUED_NOTICE]);
+        assert!(notices(&session, NoticeKind::Error, cx).is_empty());
+        session.read_with(cx, |session, _| {
+            assert_eq!(session.conversation.turn, TurnState::Running);
+            assert_eq!(session.status, ProcessStatus::Running);
+        });
+
+        // Killed again before Claude answered: not restarted a second time.
+        launches.borrow_mut()[1].exit();
+        cx.run_until_parked();
+        assert_eq!(launches.borrow().len(), 2);
+        assert_eq!(notices(&session, NoticeKind::Info, cx), [CONTINUED_NOTICE]);
+        assert_eq!(notices(&session, NoticeKind::Error, cx).len(), 1);
+        session.read_with(cx, |session, _| {
+            assert_eq!(session.conversation.turn, TurnState::Idle)
+        });
+    }
+
+    #[gpui::test]
+    async fn plan_mode_and_the_setting_keep_an_interrupted_turn_stopped(
+        cx: &mut TestAppContext,
+    ) {
+        let (session, launches) = fake_session(cx);
+        session.update(cx, |session, _| {
+            session.conversation.permission_mode = Some(PermissionMode::Plan)
+        });
+        session.update(cx, |session, cx| {
+            session.send_prompt("plan it".into(), Vec::new(), cx).unwrap()
+        });
+        launches.borrow()[0].send(INIT);
+        launches.borrow()[0].send(TOOL_CALL);
+        cx.run_until_parked();
+        launches.borrow_mut()[0].exit();
+        cx.run_until_parked();
+        assert_eq!(launches.borrow().len(), 1);
+        assert_eq!(notices(&session, NoticeKind::Error, cx).len(), 1);
+
+        cx.update(|cx| {
+            cx.update_global::<settings::SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.claude_code.get_or_insert_default().continue_after_reload =
+                        Some(false);
+                });
+            });
+        });
+        session.update(cx, |session, cx| {
+            session.conversation.permission_mode = Some(PermissionMode::Default);
+            session.send_prompt("again".into(), Vec::new(), cx).unwrap()
+        });
+        launches.borrow()[1].send(TOOL_CALL);
+        cx.run_until_parked();
+        launches.borrow_mut()[1].exit();
+        cx.run_until_parked();
+        assert_eq!(launches.borrow().len(), 2);
+        assert!(notices(&session, NoticeKind::Info, cx).is_empty());
+    }
 }
