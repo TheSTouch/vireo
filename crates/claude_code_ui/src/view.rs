@@ -2143,6 +2143,7 @@ impl ClaudeCodeView {
         PopoverMenu::new("model-menu")
             .trigger_with_tooltip(
                 Button::new("model", self.model_label(cx))
+                    .style(ButtonStyle::Filled)
                     .label_size(LabelSize::XSmall)
                     .color(Color::Muted),
                 Tooltip::text("Switch model"),

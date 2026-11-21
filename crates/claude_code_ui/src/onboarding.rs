@@ -1,5 +1,7 @@
 use fs::Fs;
-use gpui::{AnyElement, App, prelude::*};
+use std::rc::Rc;
+
+use gpui::{Action, AnyElement, App, prelude::*};
 use settings::update_settings_file;
 use ui::{KeyBinding, prelude::*};
 
@@ -30,7 +32,10 @@ pub fn render_checklist(cx: &App) -> AnyElement {
                     ),
             )
             .child(
+                // Without a width limit the details run out of the card.
                 v_flex()
+                    .flex_1()
+                    .min_w_0()
                     .gap_0p5()
                     .child(Label::new(title).size(LabelSize::Small))
                     .child(detail),
@@ -56,11 +61,12 @@ pub fn render_checklist(cx: &App) -> AnyElement {
         .child(step(
             "1",
             "Open Claude Code",
-            h_flex()
-                .gap_1()
-                .child(muted("Click the spark in the dock, or press"))
-                .child(KeyBinding::for_action(&FocusInput, cx).size(rems_from_px(11_f32)))
-                .into_any_element(),
+            with_binding(
+                "Click the spark in the dock",
+                "Click the spark in the dock, or press",
+                &FocusInput,
+                cx,
+            ),
         ))
         .child(step(
             "2",
@@ -70,11 +76,12 @@ pub fn render_checklist(cx: &App) -> AnyElement {
         .child(step(
             "3",
             "Pick up past conversations",
-            h_flex()
-                .gap_1()
-                .child(muted("Use the history button or"))
-                .child(KeyBinding::for_action(&ShowSessions, cx).size(rems_from_px(11_f32)))
-                .into_any_element(),
+            with_binding(
+                "Use the history button",
+                "Use the history button or",
+                &ShowSessions,
+                cx,
+            ),
         ))
         .child(step(
             "4",
@@ -88,6 +95,41 @@ pub fn render_checklist(cx: &App) -> AnyElement {
                     .color(Color::Muted)
                     .on_click(|_, _, cx| hide_onboarding(cx)),
             ),
+        )
+        .into_any_element()
+}
+
+/// A muted sentence ending in the action's key. The key is looked up in the
+/// whole keymap: bindings such as Focus Input's belong to the editor's
+/// context, which is not focused while the checklist shows.
+fn with_binding(
+    without_key: &'static str,
+    with_key: &'static str,
+    action: &dyn Action,
+    cx: &App,
+) -> AnyElement {
+    let keystrokes = cx
+        .key_bindings()
+        .borrow()
+        .bindings_for_action(action)
+        .last()
+        .map(|binding| Rc::<[_]>::from(binding.keystrokes()));
+    let Some(keystrokes) = keystrokes else {
+        return Label::new(format!("{without_key}."))
+            .size(LabelSize::XSmall)
+            .color(Color::Muted)
+            .into_any_element();
+    };
+    h_flex()
+        .gap_1()
+        .child(
+            Label::new(with_key)
+                .size(LabelSize::XSmall)
+                .color(Color::Muted),
+        )
+        .child(
+            KeyBinding::from_keystrokes(keystrokes, KeyBinding::is_vim_mode(cx))
+                .size(rems_from_px(11_f32)),
         )
         .into_any_element()
 }
