@@ -37,6 +37,10 @@ use crate::{
 
 const SPINNER_INTERVAL: Duration = Duration::from_millis(2500);
 const MAX_OUTPUT_LINES: usize = 40;
+/// Output lines a tool call shows before it is opened in full: enough to
+/// see the result without one call filling the panel.
+const PREVIEW_OUTPUT_LINES: usize = 12;
+const MAX_DIFF_LINES: usize = 24;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Attachment {
@@ -74,6 +78,10 @@ pub struct ClaudeCodeView {
     scroll_handle: ScrollHandle,
     markdown: HashMap<usize, (usize, Entity<Markdown>)>,
     expanded: HashSet<usize>,
+    /// Tool calls the person closed; they start open, as in the extension.
+    collapsed: HashSet<usize>,
+    /// Tool calls the person opened in full, past the preview's lines.
+    full_output: HashSet<usize>,
     pub focus_view: bool,
     attachments: Vec<Attachment>,
     editor_context: Option<EditorContext>,
@@ -170,6 +178,8 @@ impl ClaudeCodeView {
             scroll_handle: ScrollHandle::new(),
             markdown: HashMap::new(),
             expanded: HashSet::new(),
+            collapsed: HashSet::new(),
+            full_output: HashSet::new(),
             focus_view: settings.focus_view,
             attachments: Vec::new(),
             editor_context: None,
@@ -1101,11 +1111,17 @@ impl ClaudeCodeView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = cx.theme().colors();
-        let expanded = self.expanded.contains(&index);
+        let status_colors = cx.theme().status();
+        let expanded = !self.collapsed.contains(&index);
         let (dot, running) = match call.status {
             ToolStatus::Streaming | ToolStatus::Running => (Color::Accent, true),
             ToolStatus::Succeeded => (Color::Success, false),
             ToolStatus::Failed => (Color::Error, false),
+        };
+        let diff = edit_diff(call);
+        let summary = match call.file_path() {
+            Some(path) => self.relative_path(Path::new(path), cx),
+            None => call.summary(),
         };
         let header = h_flex()
             .id(("tool", index))
@@ -1118,17 +1134,52 @@ impl ClaudeCodeView {
                     .weight(gpui::FontWeight::SEMIBOLD),
             )
             .child(
-                Label::new(call.summary())
+                Label::new(summary)
                     .size(LabelSize::Small)
-                    .color(Color::Muted)
+                    .color(if call.file_path().is_some() {
+                        Color::Accent
+                    } else {
+                        Color::Muted
+                    })
                     .truncate(),
             )
-            .on_click(cx.listener(move |this, _, _, cx| this.toggle_expanded(index, cx)));
-        let input_text = tool_input_text(call);
+            .when_some(diff.as_ref(), |this, diff| {
+                let (added, removed) = diff_counts(diff);
+                this.child(
+                    Label::new(format!("+{added}"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Created),
+                )
+                .child(
+                    Label::new(format!("−{removed}"))
+                        .size(LabelSize::XSmall)
+                        .color(Color::Deleted),
+                )
+            })
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.collapsed.remove(&index) {
+                    this.collapsed.insert(index);
+                }
+                cx.notify();
+            }));
+        let full_output = self.full_output.contains(&index);
         let output_text = call
             .result
             .as_deref()
-            .map(|result| truncate_lines(result, MAX_OUTPUT_LINES));
+            .filter(|result| !result.trim().is_empty())
+            // An edit that worked says so in its diff; its result only repeats it.
+            .filter(|_| diff.is_none() || call.status == ToolStatus::Failed)
+            .map(|result| {
+                let limit = if full_output {
+                    MAX_OUTPUT_LINES
+                } else {
+                    PREVIEW_OUTPUT_LINES
+                };
+                (
+                    truncate_lines(result, limit),
+                    !full_output && result.lines().count() > PREVIEW_OUTPUT_LINES,
+                )
+            });
         let block = |label: &'static str, text: String| {
             h_flex()
                 .items_start()
@@ -1157,10 +1208,41 @@ impl ClaudeCodeView {
             .border_1()
             .border_color(colors.border_variant)
             .bg(colors.editor_background)
-            .child(block("IN", input_text))
-            .when_some(output_text, |this, output| {
+            .overflow_hidden()
+            .map(|this| match &diff {
+                Some(diff) => this.py_1().font_buffer(cx).text_xs().children(
+                    diff.iter().take(MAX_DIFF_LINES).map(|(kind, line)| {
+                        let (sign, background) = match kind {
+                            DiffLine::Context => (" ", None),
+                            DiffLine::Removed => ("-", Some(status_colors.deleted_background)),
+                            DiffLine::Added => ("+", Some(status_colors.created_background)),
+                        };
+                        h_flex()
+                            .px_2()
+                            .gap_2()
+                            .when_some(background, |this, background| this.bg(background))
+                            .child(div().flex_none().text_color(colors.text_muted).child(sign))
+                            .child(div().min_w_0().child(line.to_string()))
+                    }),
+                ),
+                None => this.child(block("IN", tool_input_text(call))),
+            })
+            .when_some(output_text, |this, (output, more)| {
                 this.child(div().h_px().bg(colors.border_variant))
                     .child(block("OUT", output))
+                    .when(more, |this| {
+                        this.child(
+                            h_flex().px_2().pb_1().justify_end().child(
+                                Button::new(("full-output", index), "Show more")
+                                    .label_size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.full_output.insert(index);
+                                        cx.notify();
+                                    })),
+                            ),
+                        )
+                    })
             });
         let content = v_flex()
             .w_full()
@@ -2363,6 +2445,73 @@ enum CommandKind {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DiffLine {
+    Context,
+    Removed,
+    Added,
+}
+
+/// The lines an Edit or Write call changes, with the lines both sides share
+/// at the start and the end kept as context, as a diff shows them.
+fn edit_diff(call: &ToolCall) -> Option<Vec<(DiffLine, String)>> {
+    let field = |name: &str| call.input.get(name).and_then(Value::as_str);
+    match call.name.as_str() {
+        "Edit" => Some(diff_lines(field("old_string")?, field("new_string")?)),
+        "Write" => Some(diff_lines("", field("content")?)),
+        _ => None,
+    }
+}
+
+fn diff_lines(old: &str, new: &str) -> Vec<(DiffLine, String)> {
+    let old: Vec<&str> = if old.is_empty() {
+        Vec::new()
+    } else {
+        old.lines().collect()
+    };
+    let new: Vec<&str> = if new.is_empty() {
+        Vec::new()
+    } else {
+        new.lines().collect()
+    };
+    let prefix = old
+        .iter()
+        .zip(&new)
+        .take_while(|(old, new)| old == new)
+        .count();
+    let suffix = old[prefix..]
+        .iter()
+        .rev()
+        .zip(new[prefix..].iter().rev())
+        .take_while(|(old, new)| old == new)
+        .count();
+    let line = |kind: DiffLine| move |text: &&str| (kind, text.to_string());
+    old[..prefix]
+        .iter()
+        .map(line(DiffLine::Context))
+        .chain(
+            old[prefix..old.len() - suffix]
+                .iter()
+                .map(line(DiffLine::Removed)),
+        )
+        .chain(
+            new[prefix..new.len() - suffix]
+                .iter()
+                .map(line(DiffLine::Added)),
+        )
+        .chain(
+            old[old.len() - suffix..]
+                .iter()
+                .map(line(DiffLine::Context)),
+        )
+        .collect()
+}
+
+fn diff_counts(diff: &[(DiffLine, String)]) -> (usize, usize) {
+    let count = |kind| diff.iter().filter(|(line, _)| *line == kind).count();
+    (count(DiffLine::Added), count(DiffLine::Removed))
+}
+
 /// The "@" mention being typed at byte `cursor`: the range from "@" to the
 /// end of the word under the cursor, and what lies between "@" and the
 /// cursor. The "@" must start the message or follow whitespace, so that an
@@ -2709,6 +2858,42 @@ mod tests {
             Some((7..10, "é"))
         );
         assert_eq!(mention_query("abc", 10), None);
+    }
+
+    #[test]
+    fn edit_diffs_keep_shared_lines_as_context() {
+        let diff = diff_lines(
+            "def greet(name):\n    return name\n",
+            "def greet(name: str) -> str:\n    return name\n",
+        );
+        assert_eq!(
+            diff,
+            vec![
+                (DiffLine::Removed, "def greet(name):".to_string()),
+                (DiffLine::Added, "def greet(name: str) -> str:".to_string()),
+                (DiffLine::Context, "    return name".to_string()),
+            ]
+        );
+        assert_eq!(diff_counts(&diff), (1, 1));
+        let diff = diff_lines("a\nb\nc", "a\nc");
+        assert_eq!(
+            diff,
+            vec![
+                (DiffLine::Context, "a".to_string()),
+                (DiffLine::Removed, "b".to_string()),
+                (DiffLine::Context, "c".to_string()),
+            ]
+        );
+        assert_eq!(
+            diff_lines("", "new\nfile"),
+            vec![
+                (DiffLine::Added, "new".to_string()),
+                (DiffLine::Added, "file".to_string()),
+            ]
+        );
+        // Identical sides: all context, nothing counted twice.
+        assert_eq!(diff_counts(&diff_lines("x\ny", "x\ny")), (0, 0));
+        assert_eq!(diff_lines("x\ny", "x\ny").len(), 2);
     }
 
     #[test]
