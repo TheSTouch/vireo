@@ -6,8 +6,9 @@ use gpui::{
     SharedString, Subscription, Task, WeakEntity, Window, prelude::*, px,
 };
 use project::Project;
-use settings::{ClaudeCodePreferredLocation, Settings as _};
+use settings::{ClaudeCodeOpensIn, ClaudeCodePreferredLocation, Settings as _};
 use ui::prelude::*;
+use util::ResultExt as _;
 use workspace::dock::{DockPosition, Panel, PanelEvent};
 use workspace::item::{Item, ItemEvent};
 use workspace::{OpenOptions, Workspace};
@@ -185,25 +186,67 @@ impl ClaudeCodePanel {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
-        if self
-            .view
-            .read(cx)
-            .session
-            .read(cx)
-            .conversation
-            .entries
-            .is_empty()
-        {
+        if conversation_is_empty(&self.view, cx) {
             window.focus(&self.view.read(cx).input_focus_handle(cx), cx);
             return;
         }
+        if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in
+            == ClaudeCodeOpensIn::NewTab
+        {
+            open_in_new_tab_later(self.workspace.clone(), None, window, cx);
+            return;
+        }
+        // Not the workspace's project: this can run inside an update of the
+        // workspace, which cannot be read then.
+        let Some(project) = self.view.read(cx).session.read(cx).project() else {
+            return;
+        };
+        self.replace_conversation(&workspace, project, None, window, cx);
+    }
+
+    /// Shows a new conversation, or the past session `resume`, in place of the
+    /// panel's conversation.
+    pub fn replace_conversation(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        project: Entity<Project>,
+        resume: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let old_session = self.view.read(cx).session.clone();
         crate::sessions::remember_closed(&old_session, cx);
-        let project = workspace.read(cx).project().clone();
-        let view = new_view(&workspace, project, None, window, cx);
+        let view = new_view(workspace, project, resume, window, cx);
         self.set_view(view, cx);
         window.focus(&self.view.read(cx).input_focus_handle(cx), cx);
     }
+}
+
+fn conversation_is_empty(view: &Entity<ClaudeCodeView>, cx: &App) -> bool {
+    view.read(cx)
+        .session
+        .read(cx)
+        .conversation
+        .entries
+        .is_empty()
+}
+
+/// Opens a conversation in a new tab once the current update has ended: the
+/// panel or tab asking for it may be inside an update of the workspace, or be
+/// one of the items the pane updates while it adds the new tab.
+fn open_in_new_tab_later(
+    workspace: WeakEntity<Workspace>,
+    resume: Option<String>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.defer(cx, move |window, cx| {
+        workspace
+            .update(cx, |workspace, cx| {
+                open(workspace, Location::NewTab, resume, window, cx);
+            })
+            .log_err();
+    });
 }
 
 impl EventEmitter<PanelEvent> for ClaudeCodePanel {}
@@ -318,10 +361,37 @@ impl ClaudeCodeTab {
         let Some(workspace) = self.workspace.upgrade() else {
             return;
         };
+        if conversation_is_empty(&self.view, cx) {
+            window.focus(&self.view.read(cx).input_focus_handle(cx), cx);
+            return;
+        }
+        if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in
+            == ClaudeCodeOpensIn::NewTab
+        {
+            open_in_new_tab_later(self.workspace.clone(), None, window, cx);
+            return;
+        }
+        // Not the workspace's project: this can run inside an update of the
+        // workspace, which cannot be read then.
+        let Some(project) = self.view.read(cx).session.read(cx).project() else {
+            return;
+        };
+        self.replace_conversation(&workspace, project, None, window, cx);
+    }
+
+    /// Shows a new conversation, or the past session `resume`, in place of the
+    /// tab's conversation.
+    pub fn replace_conversation(
+        &mut self,
+        workspace: &Entity<Workspace>,
+        project: Entity<Project>,
+        resume: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let old_session = self.view.read(cx).session.clone();
         crate::sessions::remember_closed(&old_session, cx);
-        let project = workspace.read(cx).project().clone();
-        let view = new_view(&workspace, project, None, window, cx);
+        let view = new_view(workspace, project, resume, window, cx);
         self._view_subscription = Self::subscribe_view(&view, cx);
         self.view = view;
         self.custom_title = None;
@@ -499,6 +569,78 @@ pub fn open_fork(
     view
 }
 
+/// Brings forward the tab or panel that already shows `session_id`, so a
+/// past conversation is never open twice.
+pub fn focus_open_session(
+    workspace: &mut Workspace,
+    session_id: &str,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> bool {
+    let shows_session = |view: &Entity<ClaudeCodeView>, cx: &App| {
+        view.read(cx).session.read(cx).session_id() == Some(session_id)
+    };
+    let tab = workspace
+        .items_of_type::<ClaudeCodeTab>(cx)
+        .find(|tab| shows_session(&tab.read(cx).view, cx));
+    if let Some(tab) = tab {
+        let view = tab.read(cx).view.clone();
+        workspace.activate_item(&tab, true, true, window, cx);
+        window.focus(&view.read(cx).input_focus_handle(cx), cx);
+        return true;
+    }
+    let panel_shows_session = workspace
+        .panel::<ClaudeCodePanel>(cx)
+        .is_some_and(|panel| shows_session(&panel.read(cx).view, cx));
+    if panel_shows_session {
+        open(workspace, Location::Panel, None, window, cx);
+        return true;
+    }
+    false
+}
+
+/// Where a past conversation picked from the list opens.
+#[derive(Clone)]
+pub enum PastConversationTarget {
+    NewTab,
+    Panel,
+    Tab(WeakEntity<ClaudeCodeTab>),
+}
+
+/// Opens a past conversation picked from the list, or brings forward the view
+/// that already shows it.
+pub fn open_past_conversation(
+    workspace: &mut Workspace,
+    session_id: String,
+    target: PastConversationTarget,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if focus_open_session(workspace, &session_id, window, cx) {
+        return;
+    }
+    match target {
+        PastConversationTarget::NewTab => {
+            open(workspace, Location::NewTab, Some(session_id), window, cx);
+        }
+        PastConversationTarget::Panel => {
+            open(workspace, Location::Panel, Some(session_id), window, cx);
+        }
+        PastConversationTarget::Tab(tab) => {
+            let Some(tab) = tab.upgrade() else {
+                open(workspace, Location::NewTab, Some(session_id), window, cx);
+                return;
+            };
+            let workspace_entity = cx.entity();
+            let project = workspace.project().clone();
+            workspace.activate_item(&tab, true, true, window, cx);
+            tab.update(cx, |tab, cx| {
+                tab.replace_conversation(&workspace_entity, project, Some(session_id), window, cx)
+            });
+        }
+    }
+}
+
 /// The Claude view to act on in this window: the active Claude tab, or the
 /// panel's view.
 pub fn active_view(workspace: &Workspace, cx: &App) -> Option<Entity<ClaudeCodeView>> {
@@ -554,4 +696,196 @@ pub fn open_in_new_window(workspace: &Workspace, cx: &mut App) {
         anyhow::Ok(())
     })
     .detach_and_log_err(cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use gpui::{TestAppContext, VisualTestContext};
+    use settings::SettingsStore;
+    use util::path;
+
+    fn init(cx: &mut TestAppContext) -> std::sync::Arc<workspace::AppState> {
+        cx.update(|cx| {
+            let state = workspace::AppState::test(cx);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+            ClaudeCodeSettings::register(cx);
+            crate::sessions::update_store(cx, |store| *store = Default::default());
+            state
+        })
+    }
+
+    async fn workspace_with_panel(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<Workspace>,
+        Entity<ClaudeCodePanel>,
+        &mut VisualTestContext,
+    ) {
+        let app_state = init(cx);
+        app_state
+            .fs
+            .as_fake()
+            .insert_tree(path!("/root"), serde_json::json!({ "a.rs": "" }))
+            .await;
+        let project = Project::test(app_state.fs.clone(), [path!("/root").as_ref()], cx).await;
+        let (multi_workspace, cx) = cx
+            .add_window_view(|window, cx| workspace::MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        let panel = workspace.update_in(cx, |workspace, window, cx| {
+            let project = workspace.project().clone();
+            let workspace_entity = cx.entity();
+            let panel = cx.new(|cx| ClaudeCodePanel::new(workspace_entity, project, window, cx));
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        });
+        cx.run_until_parked();
+        (workspace, panel, cx)
+    }
+
+    fn set_opens_in(
+        new_conversation: ClaudeCodeOpensIn,
+        past_conversation: ClaudeCodeOpensIn,
+        cx: &mut VisualTestContext,
+    ) {
+        cx.update(|_, cx| {
+            cx.update_global::<SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    let claude = settings.claude_code.get_or_insert_default();
+                    claude.new_conversation_opens_in = Some(new_conversation);
+                    claude.past_conversation_opens_in = Some(past_conversation);
+                });
+            });
+        });
+    }
+
+    fn start_conversation(view: &Entity<ClaudeCodeView>, session_id: &str, cx: &mut App) {
+        let session = view.read(cx).session.clone();
+        session.update(cx, |session, _| {
+            session.conversation.session_id = Some(session_id.to_string());
+            session
+                .conversation
+                .push_user_prompt("hello".into(), 0, Utc::now());
+        });
+    }
+
+    fn tabs(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<Entity<ClaudeCodeTab>> {
+        workspace.read_with(cx, |workspace, cx| {
+            workspace.items_of_type::<ClaudeCodeTab>(cx).collect()
+        })
+    }
+
+    fn session_id(view: &Entity<ClaudeCodeView>, cx: &mut VisualTestContext) -> Option<String> {
+        view.read_with(cx, |view, cx| {
+            view.session.read(cx).session_id().map(str::to_string)
+        })
+    }
+
+    #[gpui::test]
+    async fn new_conversation_from_the_panel_opens_a_tab(cx: &mut TestAppContext) {
+        let (workspace, panel, cx) = workspace_with_panel(cx).await;
+        let panel_view = panel.read_with(cx, |panel, _| panel.view.clone());
+
+        // An empty conversation is only focused.
+        panel.update_in(cx, |panel, window, cx| panel.new_conversation(window, cx));
+        cx.run_until_parked();
+        assert!(tabs(&workspace, cx).is_empty());
+
+        cx.update(|_, cx| start_conversation(&panel_view, "s1", cx));
+        panel.update_in(cx, |panel, window, cx| panel.new_conversation(window, cx));
+        cx.run_until_parked();
+        assert_eq!(tabs(&workspace, cx).len(), 1);
+        panel.read_with(cx, |panel, _| assert_eq!(panel.view, panel_view));
+        assert_eq!(session_id(&panel_view, cx).as_deref(), Some("s1"));
+
+        set_opens_in(ClaudeCodeOpensIn::Current, ClaudeCodeOpensIn::Current, cx);
+        panel.update_in(cx, |panel, window, cx| panel.new_conversation(window, cx));
+        cx.run_until_parked();
+        assert_eq!(tabs(&workspace, cx).len(), 1);
+        let replaced = panel.read_with(cx, |panel, _| panel.view.clone());
+        assert_ne!(replaced, panel_view);
+        assert_eq!(session_id(&replaced, cx), None);
+    }
+
+    #[gpui::test]
+    async fn new_conversation_from_a_tab_opens_another_tab(cx: &mut TestAppContext) {
+        let (workspace, _panel, cx) = workspace_with_panel(cx).await;
+        let view = workspace
+            .update_in(cx, |workspace, window, cx| {
+                open(workspace, Location::NewTab, None, window, cx)
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let tab = tabs(&workspace, cx)[0].clone();
+
+        tab.update_in(cx, |tab, window, cx| tab.new_conversation(window, cx));
+        cx.run_until_parked();
+        assert_eq!(tabs(&workspace, cx).len(), 1, "an empty tab is only focused");
+
+        cx.update(|_, cx| start_conversation(&view, "s1", cx));
+        tab.update_in(cx, |tab, window, cx| tab.new_conversation(window, cx));
+        cx.run_until_parked();
+        assert_eq!(tabs(&workspace, cx).len(), 2);
+        tab.read_with(cx, |tab, _| assert_eq!(tab.view, view));
+
+        set_opens_in(ClaudeCodeOpensIn::Current, ClaudeCodeOpensIn::Current, cx);
+        tab.update_in(cx, |tab, window, cx| tab.new_conversation(window, cx));
+        cx.run_until_parked();
+        assert_eq!(tabs(&workspace, cx).len(), 2);
+        let replaced = tab.read_with(cx, |tab, _| tab.view.clone());
+        assert_ne!(replaced, view);
+        assert_eq!(session_id(&replaced, cx), None);
+    }
+
+    #[gpui::test]
+    async fn past_conversations_open_in_a_tab_once(cx: &mut TestAppContext) {
+        let (workspace, panel, cx) = workspace_with_panel(cx).await;
+        let panel_view = panel.read_with(cx, |panel, _| panel.view.clone());
+        cx.update(|_, cx| start_conversation(&panel_view, "s1", cx));
+
+        let pick = |session_id: &str, cx: &mut VisualTestContext| {
+            let session_id = session_id.to_string();
+            workspace.update_in(cx, |workspace, window, cx| {
+                let target = crate::past_conversation_target(workspace, window, cx);
+                open_past_conversation(workspace, session_id, target, window, cx);
+            });
+            cx.run_until_parked();
+        };
+
+        pick("s2", cx);
+        let opened = tabs(&workspace, cx);
+        assert_eq!(opened.len(), 1);
+        let tab_view = opened[0].read_with(cx, |tab, _| tab.view.clone());
+        assert_eq!(session_id(&tab_view, cx).as_deref(), Some("s2"));
+        panel.read_with(cx, |panel, _| assert_eq!(panel.view, panel_view));
+
+        // Already open: brought forward, not opened twice.
+        pick("s2", cx);
+        pick("s1", cx);
+        assert_eq!(tabs(&workspace, cx).len(), 1);
+        panel.read_with(cx, |panel, _| assert_eq!(panel.view, panel_view));
+
+        // "current" from a tab replaces that tab's conversation.
+        set_opens_in(ClaudeCodeOpensIn::Current, ClaudeCodeOpensIn::Current, cx);
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.activate_item(&opened[0], true, true, window, cx);
+        });
+        pick("s3", cx);
+        let opened = tabs(&workspace, cx);
+        assert_eq!(opened.len(), 1);
+        let tab_view = opened[0].read_with(cx, |tab, _| tab.view.clone());
+        assert_eq!(session_id(&tab_view, cx).as_deref(), Some("s3"));
+
+        // "current" from the panel replaces the panel's conversation.
+        workspace.update_in(cx, |workspace, window, cx| {
+            open(workspace, Location::Panel, None, window, cx);
+        });
+        pick("s4", cx);
+        assert_eq!(tabs(&workspace, cx).len(), 1);
+        let panel_view = panel.read_with(cx, |panel, _| panel.view.clone());
+        assert_eq!(session_id(&panel_view, cx).as_deref(), Some("s4"));
+    }
 }

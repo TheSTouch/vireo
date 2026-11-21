@@ -13,7 +13,7 @@ pub mod settings;
 pub mod view;
 
 use ::settings::Settings as _;
-use gpui::{App, AppContext as _, Context, Entity, Window, actions};
+use gpui::{App, AppContext as _, Context, Entity, Focusable as _, Window, actions};
 use workspace::Workspace;
 
 pub use crate::panel::{ClaudeCodePanel, ClaudeCodeTab};
@@ -186,7 +186,11 @@ fn register_workspace_actions(workspace: &mut Workspace) {
             extras::toggle_dictation(workspace, cx);
         })
         .register_action(|workspace, _: &NewConversation, window, cx| {
-            if let Some(panel) = workspace.focus_panel::<ClaudeCodePanel>(window, cx) {
+            if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in
+                == ::settings::ClaudeCodeOpensIn::NewTab
+            {
+                open(workspace, Location::NewTab, None, window, cx);
+            } else if let Some(panel) = workspace.focus_panel::<ClaudeCodePanel>(window, cx) {
                 panel.update(cx, |panel, cx| panel.new_conversation(window, cx));
             }
         })
@@ -283,7 +287,7 @@ fn show_sessions(
     let store = sessions::read_store(cx);
     let days = ClaudeCodeSettings::get_global(cx).archive_inactive_sessions;
     let open_ids = open_session_ids(workspace, cx);
-    let in_tab = workspace.active_item_as::<ClaudeCodeTab>(cx).is_some();
+    let target = past_conversation_target(workspace, window, cx);
     let listing = cx.background_spawn(async move { sessions::list_sessions(&dir, &store) });
     cx.spawn_in(window, async move |workspace, cx| {
         let mut sessions = listing.await;
@@ -306,12 +310,13 @@ fn show_sessions(
                 let weak_workspace = cx.entity().downgrade();
                 let on_open: sessions_ui::OnOpen =
                     std::sync::Arc::new(move |workspace, session_id, window, cx| {
-                        let location = if in_tab {
-                            Location::NewTab
-                        } else {
-                            Location::Panel
-                        };
-                        open(workspace, location, Some(session_id), window, cx);
+                        panel::open_past_conversation(
+                            workspace,
+                            session_id,
+                            target.clone(),
+                            window,
+                            cx,
+                        );
                     });
                 workspace.toggle_modal(window, cx, |window, cx| {
                     let delegate =
@@ -322,6 +327,27 @@ fn show_sessions(
             .ok();
     })
     .detach();
+}
+
+/// Where `past_conversation_opens_in` puts a conversation picked from the
+/// list: a new tab, or the view the list was opened from.
+fn past_conversation_target(
+    workspace: &Workspace,
+    window: &Window,
+    cx: &App,
+) -> panel::PastConversationTarget {
+    if ClaudeCodeSettings::get_global(cx).past_conversation_opens_in
+        == ::settings::ClaudeCodeOpensIn::NewTab
+    {
+        return panel::PastConversationTarget::NewTab;
+    }
+    let panel_focused = workspace
+        .panel::<ClaudeCodePanel>(cx)
+        .is_some_and(|panel| panel.focus_handle(cx).contains_focused(window, cx));
+    match workspace.active_item_as::<ClaudeCodeTab>(cx) {
+        Some(tab) if !panel_focused => panel::PastConversationTarget::Tab(tab.downgrade()),
+        _ => panel::PastConversationTarget::Panel,
+    }
 }
 
 fn reopen_closed_session(

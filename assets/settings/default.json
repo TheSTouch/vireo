@@ -2106,6 +2106,10 @@
     "use_ctrl_enter_to_send": false,
     // Where Claude opens by default: "panel" or "sidebar".
     "preferred_location": "panel",
+    // Where the new conversation button opens a conversation: "new_tab" or "current".
+    "new_conversation_opens_in": "new_tab",
+    // Where a conversation picked from past conversations opens: "new_tab" or "current".
+    "past_conversation_opens_in": "new_tab",
     // Keep files opened from a Claude tab out of the pane that holds it.
     "lock_editor_groups": true,
     // Use Cmd/Ctrl+N for a new conversation while Claude is focused.

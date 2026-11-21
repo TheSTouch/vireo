@@ -127,6 +127,10 @@ impl ClaudeSession {
         self.conversation.session_id.as_deref()
     }
 
+    pub fn project(&self) -> Option<Entity<Project>> {
+        self.project.upgrade()
+    }
+
     pub fn is_running(&self) -> bool {
         self.process.is_some()
     }

@@ -1,5 +1,5 @@
 use settings::{
-    ClaudeCodePermissionMode, ClaudeCodePreferredLocation, ClaudeCodeSpinnerVerbs,
+    ClaudeCodeOpensIn, ClaudeCodePermissionMode, ClaudeCodePreferredLocation, ClaudeCodeSpinnerVerbs,
     ClaudeCodeSpinnerVerbsMode, RegisterSetting, Settings, SettingsContent,
 };
 
@@ -18,6 +18,8 @@ pub struct ClaudeCodeSettings {
     pub focus_view: bool,
     pub use_ctrl_enter_to_send: bool,
     pub preferred_location: ClaudeCodePreferredLocation,
+    pub new_conversation_opens_in: ClaudeCodeOpensIn,
+    pub past_conversation_opens_in: ClaudeCodeOpensIn,
     pub lock_editor_groups: bool,
     pub enable_new_conversation_shortcut: bool,
     pub enable_reopen_closed_session_shortcut: bool,
@@ -65,6 +67,8 @@ impl Settings for ClaudeCodeSettings {
             focus_view: claude.focus_view.unwrap_or(false),
             use_ctrl_enter_to_send: claude.use_ctrl_enter_to_send.unwrap_or(false),
             preferred_location: claude.preferred_location.unwrap_or_default(),
+            new_conversation_opens_in: claude.new_conversation_opens_in.unwrap_or_default(),
+            past_conversation_opens_in: claude.past_conversation_opens_in.unwrap_or_default(),
             lock_editor_groups: claude.lock_editor_groups.unwrap_or(true),
             enable_new_conversation_shortcut: claude
                 .enable_new_conversation_shortcut
@@ -141,6 +145,14 @@ mod tests {
             assert_eq!(
                 settings.preferred_location,
                 ClaudeCodePreferredLocation::Panel
+            );
+            assert_eq!(
+                settings.new_conversation_opens_in,
+                ClaudeCodeOpensIn::NewTab
+            );
+            assert_eq!(
+                settings.past_conversation_opens_in,
+                ClaudeCodeOpensIn::NewTab
             );
             assert_eq!(settings.initial_permission_mode, None);
             assert_eq!(settings.claude_process_wrapper, None);

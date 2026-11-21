@@ -56,6 +56,16 @@ pub struct ClaudeCodeSettingsContent {
     ///
     /// Default: panel
     pub preferred_location: Option<ClaudeCodePreferredLocation>,
+    /// Where the new conversation button opens a conversation: a new editor
+    /// tab, or in place of the conversation in the current view.
+    ///
+    /// Default: new_tab
+    pub new_conversation_opens_in: Option<ClaudeCodeOpensIn>,
+    /// Where a conversation picked from past conversations opens: a new
+    /// editor tab, or in place of the conversation in the current view.
+    ///
+    /// Default: new_tab
+    pub past_conversation_opens_in: Option<ClaudeCodeOpensIn>,
     /// Keep files opened from a Claude tab out of the pane that holds it.
     ///
     /// Default: true
@@ -139,6 +149,16 @@ pub enum ClaudeCodePreferredLocation {
     Sidebar,
     #[default]
     Panel,
+}
+
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom,
+)]
+#[serde(rename_all = "snake_case")]
+pub enum ClaudeCodeOpensIn {
+    #[default]
+    NewTab,
+    Current,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]
