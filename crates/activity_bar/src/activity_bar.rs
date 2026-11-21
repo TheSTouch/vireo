@@ -265,6 +265,14 @@ impl ActivityBar {
         };
         v_flex()
             .child(cell(
+                menu_button("activity-develop", IconName::ActivityDevelop)
+                    .tooltip(Tooltip::text("Develop Vireo"))
+                    .on_click(|_, window, cx| {
+                        window.dispatch_action(zed_actions::develop_vireo::Open.boxed_clone(), cx)
+                    })
+                    .into_any_element(),
+            ))
+            .child(cell(
                 PopoverMenu::new("activity-accounts")
                     .anchor(gpui::Anchor::BottomLeft)
                     .attach(gpui::Anchor::BottomRight)

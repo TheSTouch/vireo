@@ -433,6 +433,18 @@ pub mod claude_code {
     }
 }
 
+pub mod develop_vireo {
+    use gpui::actions;
+    actions!(
+        develop_vireo,
+        [
+            /// Opens the Develop Vireo page: Vireo's sources and prepared
+            /// Claude Code sessions for changing Vireo itself.
+            Open,
+        ]
+    );
+}
+
 pub mod project_panel {
     use gpui::actions;
 

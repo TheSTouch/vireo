@@ -4991,6 +4991,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "develop_vireo"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "claude_code_ui",
+ "collections",
+ "db",
+ "editor",
+ "fs",
+ "gpui",
+ "log",
+ "project",
+ "settings",
+ "tempfile",
+ "theme",
+ "theme_settings",
+ "ui",
+ "util",
+ "workspace",
+ "zed_actions",
+]
+
+[[package]]
 name = "diagnostics"
 version = "0.1.0"
 dependencies = [
@@ -22703,6 +22726,7 @@ dependencies = [
  "debugger_tools",
  "debugger_ui",
  "dev_container",
+ "develop_vireo",
  "diagnostics",
  "edit_prediction",
  "edit_prediction_ui",

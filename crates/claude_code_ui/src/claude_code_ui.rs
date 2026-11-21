@@ -219,6 +219,20 @@ fn focus_input(
     open_preferred(workspace, window, cx);
 }
 
+/// Opens a new conversation in an editor tab with `prompt` in its message
+/// box, not sent, so the person reads it first (the Develop Vireo page's
+/// prepared sessions).
+pub fn open_with_prompt(
+    workspace: &mut Workspace,
+    prompt: String,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    if let Some(view) = open(workspace, Location::NewTab, None, window, cx) {
+        view.update(cx, |view, cx| view.set_input_text(&prompt, window, cx));
+    }
+}
+
 /// Handles `zed://claude-code/open?prompt=…&session=…`: resumes the session
 /// when one is given, and fills the prompt in without sending it.
 pub fn open_from_uri(

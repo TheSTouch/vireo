@@ -60,6 +60,10 @@ VS Code runs every window as a Chromium renderer plus a Node extension host, plu
 3. Feature addons, one VS Code capability at a time.
 4. Vireo branding, builds and releases.
 
+## Changing Vireo from Vireo
+
+The **Develop Vireo** page (the tools icon at the bottom of the activity bar) downloads Vireo's sources and opens prepared Claude Code sessions in them: change something, fix a bug, build and install Vireo, update to the latest Vireo. Ask for a change in the editor, then rebuild your own copy. See [Develop Vireo](./docs/src/vs-core/develop-vireo.md).
+
 ## Building
 
 Vireo builds exactly like Zed:
@@ -67,6 +71,8 @@ Vireo builds exactly like Zed:
 - [Building for macOS](./docs/src/development/macos.md)
 - [Building for Linux](./docs/src/development/linux.md)
 - [Building for Windows](./docs/src/development/windows.md)
+
+On macOS, `script/install-vireo-mac` builds the app in release mode and installs it into `/Applications`.
 
 ## Borrowing from Zed
 

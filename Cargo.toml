@@ -59,6 +59,7 @@ members = [
     "crates/debugger_ui",
     "crates/deepseek",
     "crates/dev_container",
+    "crates/develop_vireo",
     "crates/diagnostics",
     "crates/docs_preprocessor",
     "crates/edit_prediction",
@@ -350,6 +351,7 @@ debugger_ui = { path = "crates/debugger_ui" }
 deepseek = { path = "crates/deepseek" }
 derive_refineable = { path = "crates/refineable/derive_refineable" }
 dev_container = { path = "crates/dev_container" }
+develop_vireo = { path = "crates/develop_vireo" }
 diagnostics = { path = "crates/diagnostics" }
 edit_prediction = { path = "crates/edit_prediction" }
 edit_prediction_context = { path = "crates/edit_prediction_context" }

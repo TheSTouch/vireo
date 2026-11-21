@@ -6294,6 +6294,7 @@ mod tests {
                 "debug_panel",
                 "debugger",
                 "dev",
+                "develop_vireo",
                 "diagnostics",
                 "edit_prediction",
                 "editor",

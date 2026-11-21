@@ -21,6 +21,7 @@ CODICONS = {
     "activity_source_control": "source-control",
     "activity_run_debug": "debug-alt",
     "activity_extensions": "extensions",
+    "activity_develop": "tools",
     "activity_accounts": "account",
     "activity_manage": "settings-gear",
     "layout_sidebar_left": "layout-sidebar-left",

@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Builds Vireo from this checkout in release mode and installs it into /Applications.
+#
+# It follows script/bundle-mac without the DMG, the global npm install and Zed's
+# notarization, and keeps the dev release channel, so the app never offers updates
+# from Zed's servers. The bundle is ad-hoc signed: the first time, open it with a
+# right-click > Open if macOS refuses.
+#
+# The first build takes 30 to 60 minutes. Run nothing else with cargo meanwhile:
+# Vireo's builds use a lot of memory.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+if [[ "$(uname)" != "Darwin" ]]; then
+  echo "script/install-vireo-mac builds the macOS app; see docs/src/development for other systems." >&2
+  exit 1
+fi
+
+export SDKROOT="${SDKROOT:-$(xcrun --sdk macosx --show-sdk-path)}"
+export MACOSX_DEPLOYMENT_TARGET=12.0
+export ZED_RELEASE_CHANNEL="$(<crates/zed/RELEASE_CHANNEL)"
+export ZED_BUNDLE=true CARGO_BUNDLE_SKIP_BUILD=true CXXFLAGS="-stdlib=libc++"
+tools_target="$PWD/target/cargo-install"
+target_triple="$(rustc --version --verbose | sed -n 's/^host: //p')"
+case "$target_triple" in
+  aarch64-apple-darwin) git_arch=arm64 ;;
+  x86_64-apple-darwin) git_arch=x64 ;;
+  *) echo "Unsupported architecture $target_triple" >&2; exit 1 ;;
+esac
+step() { echo "== $(date +%H:%M:%S) $*"; }
+
+step "release channel $ZED_RELEASE_CHANNEL, $target_triple"
+if [ "$(cargo -q bundle --help 2>&1 | head -n 1)" != "cargo-bundle v0.6.1-zed" ]; then
+  step "installing cargo-bundle"
+  cargo install --target-dir "$tools_target" cargo-bundle --git https://github.com/zed-industries/cargo-bundle.git --branch zed-deploy
+fi
+step "licenses"
+script/generate-licenses
+
+step "compiling vireo (release)"
+cargo --config .cargo/bundle-config.toml rustc --release --package zed --bin zed --target "$target_triple" -- -C 'link-arg=-Wl,-unexported_symbol,__R*'
+step "compiling the cli (release)"
+cargo --config .cargo/bundle-config.toml build --release --package cli --target "$target_triple"
+
+step "bundling"
+pushd crates/zed >/dev/null
+cp Cargo.toml Cargo.toml.backup
+trap 'mv -f Cargo.toml.backup Cargo.toml 2>/dev/null || true' EXIT
+sed -i.backup "s/package.metadata.bundle-${ZED_RELEASE_CHANNEL}/package.metadata.bundle/" Cargo.toml
+app_path=$(cargo bundle --release --target "$target_triple" --select-workspace-root | xargs)
+mv Cargo.toml.backup Cargo.toml
+trap - EXIT
+popd >/dev/null
+cp crates/zed/resources/Document.icns "$app_path/Contents/Resources/Document.icns"
+
+step "bundled git"
+git_tmp=$(mktemp -d)
+curl --silent --fail --location "https://github.com/desktop/dugite-native/releases/download/v2.43.3/dugite-native-v2.43.3-fa29823-macOS-${git_arch}.tar.gz" | tar -xz -C "$git_tmp" bin/git
+mkdir -p "$app_path/Contents/Frameworks"
+mv "$git_tmp/bin/git" "$app_path/Contents/MacOS/git"
+rm -rf "$git_tmp"
+
+step "ad-hoc signing"
+sed '/com.apple.developer.associated-domains/,+1d' crates/zed/resources/zed.entitlements > "$app_path/Contents/Resources/zed.entitlements"
+codesign --force --deep --entitlements "$app_path/Contents/Resources/zed.entitlements" --sign - "$app_path"
+
+name=$(basename "$app_path")
+step "installing /Applications/$name"
+rm -rf "/Applications/$name"
+ditto "$app_path" "/Applications/$name"
+step "done: quit Vireo and open /Applications/$name"
