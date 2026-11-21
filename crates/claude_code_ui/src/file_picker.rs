@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fuzzy::{StringMatch, StringMatchCandidate};
-use gpui::{App, Context, DismissEvent, Entity, Task, WeakEntity, Window};
+use gpui::{App, BackgroundExecutor, Context, DismissEvent, Entity, Task, WeakEntity, Window};
 use picker::{Picker, PickerDelegate};
 use project::Project;
 use ui::{HighlightedLabel, ListItem, ListItemSpacing, prelude::*};
@@ -19,7 +19,7 @@ pub type FilePicker = Picker<FilePickerDelegate>;
 
 pub struct FilePickerDelegate {
     view: WeakEntity<ClaudeCodeView>,
-    candidates: Arc<Vec<(PathBuf, String, bool)>>,
+    candidates: Arc<Vec<ProjectEntry>>,
     matches: Vec<StringMatch>,
     selected_index: usize,
 }
@@ -31,41 +31,95 @@ impl FilePickerDelegate {
         respect_git_ignore: bool,
         cx: &App,
     ) -> Self {
-        let mut candidates = Vec::new();
-        let project = project.read(cx);
-        let multiple_roots = project.visible_worktrees(cx).count() > 1;
-        'worktrees: for worktree in project.visible_worktrees(cx) {
-            let worktree = worktree.read(cx);
-            let root = worktree.abs_path();
-            let root_name = worktree.root_name_str().to_string();
-            for entry in worktree.entries(!respect_git_ignore, 0) {
-                if entry.path.is_empty() {
-                    continue;
-                }
-                let relative = entry.path.as_unix_str().to_string();
-                let display = if multiple_roots {
-                    format!("{root_name}/{relative}")
-                } else {
-                    relative
-                };
-                let display = if entry.is_dir() {
-                    format!("{display}/")
-                } else {
-                    display
-                };
-                candidates.push((root.join(entry.path.as_std_path()), display, entry.is_dir()));
-                if candidates.len() >= MAX_CANDIDATES {
-                    break 'worktrees;
-                }
-            }
-        }
         Self {
             view,
-            candidates: Arc::new(candidates),
+            candidates: Arc::new(project_entries(project.read(cx), respect_git_ignore, cx)),
             matches: Vec::new(),
             selected_index: 0,
         }
     }
+}
+
+/// A file or folder of the project that can be mentioned.
+pub struct ProjectEntry {
+    pub abs_path: PathBuf,
+    /// The path shown in lists: relative to its root, prefixed with the
+    /// root's name when the project has several, and ending in "/" for folders.
+    pub display: String,
+    pub is_dir: bool,
+}
+
+pub fn project_entries(project: &Project, respect_git_ignore: bool, cx: &App) -> Vec<ProjectEntry> {
+    let mut candidates = Vec::new();
+    let multiple_roots = project.visible_worktrees(cx).count() > 1;
+    for worktree in project.visible_worktrees(cx) {
+        let worktree = worktree.read(cx);
+        let root = worktree.abs_path();
+        let root_name = worktree.root_name_str().to_string();
+        for entry in worktree.entries(!respect_git_ignore, 0) {
+            if entry.path.is_empty() {
+                continue;
+            }
+            let relative = entry.path.as_unix_str().to_string();
+            let display = if multiple_roots {
+                format!("{root_name}/{relative}")
+            } else {
+                relative
+            };
+            let display = if entry.is_dir() {
+                format!("{display}/")
+            } else {
+                display
+            };
+            candidates.push(ProjectEntry {
+                abs_path: root.join(entry.path.as_std_path()),
+                display,
+                is_dir: entry.is_dir(),
+            });
+            if candidates.len() >= MAX_CANDIDATES {
+                return candidates;
+            }
+        }
+    }
+    candidates
+}
+
+/// The entries matching `query`, best first. With no query, the first files.
+pub async fn match_entries(
+    candidates: &[ProjectEntry],
+    query: &str,
+    max_results: usize,
+    executor: BackgroundExecutor,
+) -> Vec<StringMatch> {
+    if query.is_empty() {
+        return candidates
+            .iter()
+            .enumerate()
+            .filter(|(_, entry)| !entry.is_dir)
+            .take(max_results)
+            .map(|(index, entry)| StringMatch {
+                candidate_id: index,
+                string: entry.display.clone(),
+                positions: Vec::new(),
+                score: 0.0,
+            })
+            .collect();
+    }
+    let strings: Vec<StringMatchCandidate> = candidates
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| StringMatchCandidate::new(index, &entry.display))
+        .collect();
+    fuzzy::match_strings(
+        &strings,
+        query,
+        false,
+        true,
+        max_results,
+        &AtomicBool::new(false),
+        executor,
+    )
+    .await
 }
 
 impl PickerDelegate for FilePickerDelegate {
@@ -101,36 +155,7 @@ impl PickerDelegate for FilePickerDelegate {
         let candidates = self.candidates.clone();
         let executor = cx.background_executor().clone();
         cx.spawn(async move |picker, cx| {
-            let matches = if query.is_empty() {
-                candidates
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, (_, _, is_dir))| !is_dir)
-                    .take(MAX_RESULTS)
-                    .map(|(index, (_, display, _))| StringMatch {
-                        candidate_id: index,
-                        string: display.clone(),
-                        positions: Vec::new(),
-                        score: 0.0,
-                    })
-                    .collect()
-            } else {
-                let strings: Vec<StringMatchCandidate> = candidates
-                    .iter()
-                    .enumerate()
-                    .map(|(index, (_, display, _))| StringMatchCandidate::new(index, display))
-                    .collect();
-                fuzzy::match_strings(
-                    &strings,
-                    &query,
-                    false,
-                    true,
-                    MAX_RESULTS,
-                    &AtomicBool::new(false),
-                    executor,
-                )
-                .await
-            };
+            let matches = match_entries(&candidates, &query, MAX_RESULTS, executor).await;
             picker
                 .update(cx, |picker, cx| {
                     picker.delegate.matches = matches;
@@ -149,7 +174,7 @@ impl PickerDelegate for FilePickerDelegate {
         else {
             return;
         };
-        let path = candidate.0.clone();
+        let path = candidate.abs_path.clone();
         self.view
             .update(cx, |view, cx| {
                 view.add_attachment(Attachment::Mention(path), cx);
@@ -174,7 +199,7 @@ impl PickerDelegate for FilePickerDelegate {
         let is_dir = self
             .candidates
             .get(found.candidate_id)
-            .is_some_and(|candidate| candidate.2);
+            .is_some_and(|candidate| candidate.is_dir);
         Some(
             ListItem::new(index)
                 .inset(true)

@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
 use base64::Engine as _;
 use chrono::{DateTime, Local, Utc};
-use editor::{Editor, EditorEvent, EditorMode, MultiBuffer};
+use editor::{Editor, EditorEvent, EditorMode, MultiBuffer, MultiBufferOffset, SelectionEffects};
 use gpui::{
     Action, AnyElement, App, ClipboardEntry, Context, Entity, EventEmitter, FocusHandle, Focusable,
     KeyContext, ScrollHandle, SharedString, Subscription, Task, WeakEntity, Window, prelude::*, px,
@@ -16,14 +17,15 @@ use project::Project;
 use serde_json::Value;
 use settings::Settings as _;
 use ui::{
-    CommonAnimationExt as _, ContextMenu, ContextMenuEntry, Divider, IconButtonShape, PopoverMenu,
-    Tooltip, prelude::*,
+    CommonAnimationExt as _, ContextMenu, ContextMenuEntry, Divider, HighlightedLabel,
+    IconButtonShape, PopoverMenu, Tooltip, prelude::*,
 };
 use workspace::Workspace;
 
 use crate::conversation::{
     Entry, NoticeKind, PermissionRequest, PermissionStatus, ToolCall, ToolStatus, TurnState,
 };
+use crate::file_picker::{ProjectEntry, match_entries, project_entries};
 use crate::protocol::{OutgoingControlRequest, PermissionDecision, PermissionMode};
 use crate::session::{ClaudeSession, ProcessStatus, PromptImage, SessionEvent};
 use crate::settings::{ClaudeCodeSettings, spinner_verbs};
@@ -86,6 +88,11 @@ pub struct ClaudeCodeView {
     /// Escape closed the "/" list; it reopens once the message stops being a command.
     commands_dismissed: bool,
     command_scroll: ScrollHandle,
+    /// The "@" mention being typed, whose matches replace the "/" list.
+    mention: Option<MentionState>,
+    /// The project's files and folders, listed when an "@" list opens.
+    mention_candidates: Option<Arc<Vec<ProjectEntry>>>,
+    _mention_matches: Option<Task<()>>,
     _spinner: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -127,14 +134,14 @@ impl ClaudeCodeView {
         });
         let mut subscriptions = vec![
             cx.subscribe_in(&session, window, Self::on_session_event),
-            cx.subscribe(&input, |this, _, event: &EditorEvent, cx| {
-                if matches!(event, EditorEvent::BufferEdited) {
+            cx.subscribe(&input, |this, _, event: &EditorEvent, cx| match event {
+                EditorEvent::BufferEdited => {
                     this.refresh_placeholder_later(cx);
                     this.command_selection = 0;
-                    if command_query(&this.input.read(cx).text(cx)).is_none() {
-                        this.commands_dismissed = false;
-                    }
+                    this.update_mention(cx);
                 }
+                EditorEvent::SelectionsChanged { .. } => this.update_mention(cx),
+                _ => {}
             }),
             cx.observe_global::<settings::SettingsStore>(|this, cx| {
                 let settings = ClaudeCodeSettings::get_global(cx);
@@ -175,6 +182,9 @@ impl ClaudeCodeView {
             command_selection: 0,
             commands_dismissed: false,
             command_scroll: ScrollHandle::new(),
+            mention: None,
+            mention_candidates: None,
+            _mention_matches: None,
             _spinner: None,
             _subscriptions: subscriptions,
         };
@@ -1669,6 +1679,9 @@ impl ClaudeCodeView {
         if self.commands_dismissed {
             return Vec::new();
         }
+        if let Some(mention) = &self.mention {
+            return mention.entries.clone();
+        }
         let text = self.input.read(cx).text(cx);
         let Some(query) = command_query(&text) else {
             return Vec::new();
@@ -1707,26 +1720,45 @@ impl ClaudeCodeView {
                 .border_color(colors.border_variant)
                 .bg(colors.elevated_surface_background)
                 .children(entries.into_iter().enumerate().map(|(index, entry)| {
-                    let label = entry.label.clone();
-                    let description = entry.description.clone();
-                    h_flex()
+                    let row = h_flex()
                         .id(("command", index))
                         .px_2()
                         .py_0p5()
-                        .gap_3()
                         .cursor_pointer()
                         .when(index == selected, |this| this.bg(colors.element_selected))
-                        .hover(|this| this.bg(colors.element_hover))
-                        .child(Label::new(label).size(LabelSize::Small))
-                        .child(
-                            Label::new(description)
-                                .size(LabelSize::XSmall)
-                                .color(Color::Muted)
-                                .truncate(),
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.accept_command(entry.clone(), window, cx);
-                        }))
+                        .hover(|this| this.bg(colors.element_hover));
+                    let row = match &entry.kind {
+                        CommandKind::Mention {
+                            is_dir, positions, ..
+                        } => row
+                            .gap_1p5()
+                            .child(
+                                Icon::new(if *is_dir {
+                                    IconName::Folder
+                                } else {
+                                    IconName::File
+                                })
+                                .size(IconSize::Small)
+                                .color(Color::Muted),
+                            )
+                            .child(
+                                HighlightedLabel::new(entry.label.clone(), positions.clone())
+                                    .size(LabelSize::Small)
+                                    .truncate(),
+                            ),
+                        CommandKind::Slash(_) | CommandKind::Action(_) => row
+                            .gap_3()
+                            .child(Label::new(entry.label.clone()).size(LabelSize::Small))
+                            .child(
+                                Label::new(entry.description.clone())
+                                    .size(LabelSize::XSmall)
+                                    .color(Color::Muted)
+                                    .truncate(),
+                            ),
+                    };
+                    row.on_click(cx.listener(move |this, _, window, cx| {
+                        this.accept_command(entry.clone(), window, cx);
+                    }))
                 }))
                 .into_any_element(),
         )
@@ -1794,7 +1826,118 @@ impl ClaudeCodeView {
                     .update(cx, |input, cx| input.set_text("", window, cx));
                 window.dispatch_action(action(), cx);
             }
+            CommandKind::Mention { path, is_dir, .. } => {
+                if let Some(mention) = self.mention.take() {
+                    self.input.update(cx, |input, cx| {
+                        let text = input.text(cx);
+                        let insertion = mention_insertion(&text, &mention.range, &path, is_dir);
+                        input.change_selections(SelectionEffects::default(), window, cx, |s| {
+                            s.select_ranges([MultiBufferOffset(mention.range.start)
+                                ..MultiBufferOffset(mention.range.end)])
+                        });
+                        input.insert(&insertion, window, cx);
+                    });
+                }
+                window.focus(&self.input.focus_handle(cx), cx);
+            }
         }
+        cx.notify();
+    }
+
+    /// Follows the "@" mention under the cursor, matching the project's files
+    /// and folders against what follows the "@".
+    fn update_mention(&mut self, cx: &mut Context<Self>) {
+        let (text, cursor) = self.input.update(cx, |input, cx| {
+            let snapshot = input.display_snapshot(cx);
+            let cursor = input
+                .selections
+                .newest::<MultiBufferOffset>(&snapshot)
+                .head();
+            (input.text(cx), cursor.0)
+        });
+        let Some((range, query)) = mention_query(&text, cursor) else {
+            if self.mention.take().is_some() {
+                cx.notify();
+            }
+            self.mention_candidates = None;
+            self._mention_matches = None;
+            if command_query(&text).is_none() {
+                self.commands_dismissed = false;
+            }
+            return;
+        };
+        if self
+            .mention
+            .as_ref()
+            .is_none_or(|mention| mention.range.start != range.start)
+        {
+            // Escape closes the list for one mention, not for the next "@".
+            self.commands_dismissed = false;
+        }
+        if let Some(mention) = self.mention.as_mut()
+            && mention.query == query
+        {
+            mention.range = range;
+            return;
+        }
+        let entries = self
+            .mention
+            .take()
+            .map(|mention| mention.entries)
+            .unwrap_or_default();
+        self.mention = Some(MentionState {
+            range,
+            query: query.to_string(),
+            entries,
+        });
+        let candidates = match &self.mention_candidates {
+            Some(candidates) => candidates.clone(),
+            None => {
+                let respect_git_ignore = ClaudeCodeSettings::get_global(cx).respect_git_ignore;
+                let entries = self
+                    .workspace
+                    .upgrade()
+                    .map(|workspace| {
+                        let project = workspace_project(workspace.read(cx));
+                        project_entries(project.read(cx), respect_git_ignore, cx)
+                    })
+                    .unwrap_or_default();
+                let candidates = Arc::new(entries);
+                self.mention_candidates = Some(candidates.clone());
+                candidates
+            }
+        };
+        let query = query.to_string();
+        let executor = cx.background_executor().clone();
+        self._mention_matches = Some(cx.spawn(async move |this, cx| {
+            let matches = match_entries(&candidates, &query, MENTION_MAX_RESULTS, executor).await;
+            this.update(cx, |this, cx| {
+                let entries = matches
+                    .into_iter()
+                    .filter_map(|found| {
+                        let entry = candidates.get(found.candidate_id)?;
+                        Some(CommandEntry {
+                            label: entry.display.clone().into(),
+                            description: SharedString::default(),
+                            kind: CommandKind::Mention {
+                                path: this.relative_path(&entry.abs_path, cx),
+                                is_dir: entry.is_dir,
+                                positions: found.positions,
+                            },
+                        })
+                    })
+                    .collect();
+                if let Some(mention) = this.mention.as_mut()
+                    && mention.query == query
+                {
+                    mention.entries = entries;
+                    this.command_selection = 0;
+                    this.command_scroll.scroll_to_item(0);
+                    cx.notify();
+                }
+            })
+            .ok();
+        }));
         cx.notify();
     }
 
@@ -2189,6 +2332,14 @@ fn id_hash(id: &ElementId) -> usize {
 }
 
 const COMMAND_LIST_MAX_HEIGHT: f32 = 240.;
+const MENTION_MAX_RESULTS: usize = 50;
+
+struct MentionState {
+    /// The bytes the chosen path replaces: from "@" to the end of the word.
+    range: Range<usize>,
+    query: String,
+    entries: Vec<CommandEntry>,
+}
 
 #[derive(Clone)]
 struct CommandEntry {
@@ -2203,6 +2354,53 @@ enum CommandKind {
     Slash(String),
     /// A panel action, run at once.
     Action(fn() -> Box<dyn Action>),
+    /// A file or folder, inserted as `@path ` in place of the "@" being typed.
+    Mention {
+        /// Relative to the session's directory.
+        path: String,
+        is_dir: bool,
+        positions: Vec<usize>,
+    },
+}
+
+/// The "@" mention being typed at byte `cursor`: the range from "@" to the
+/// end of the word under the cursor, and what lies between "@" and the
+/// cursor. The "@" must start the message or follow whitespace, so that an
+/// address like name@example.com does not open the list.
+fn mention_query(text: &str, cursor: usize) -> Option<(Range<usize>, &str)> {
+    let before = text.get(..cursor)?;
+    let at = before.rfind(|c: char| c == '@' || c.is_whitespace())?;
+    let query = before[at..].strip_prefix('@')?;
+    if before[..at]
+        .chars()
+        .next_back()
+        .is_some_and(|c| !c.is_whitespace())
+    {
+        return None;
+    }
+    let after = &text[cursor..];
+    let end = cursor + after.find(char::is_whitespace).unwrap_or(after.len());
+    Some((at..end, query))
+}
+
+/// What replaces the "@" being typed: the mention, folders ending in "/",
+/// followed by a space unless one is already there.
+fn mention_insertion(text: &str, range: &Range<usize>, path: &str, is_dir: bool) -> String {
+    let path = if is_dir {
+        format!("{}/", path.trim_end_matches('/'))
+    } else {
+        path.to_string()
+    };
+    let mention = mention_text(&path, None);
+    let followed_by_space = text
+        .get(range.end..)
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(char::is_whitespace);
+    if followed_by_space {
+        mention
+    } else {
+        format!("{mention} ")
+    }
 }
 
 /// What follows "/" while the message is a command being typed: it starts
@@ -2447,6 +2645,7 @@ pub fn strip_context_preamble(text: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use util::path;
 
     #[test]
     fn slash_opens_the_command_list() {
@@ -2486,6 +2685,147 @@ mod tests {
             ["New conversation", "Past conversations"].map(String::from)
         );
         assert!(labels("zzz").is_empty());
+    }
+
+    #[test]
+    fn at_sign_opens_the_mention_list() {
+        assert_eq!(mention_query("@", 1), Some((0..1, "")));
+        assert_eq!(mention_query("see @src/ma", 11), Some((4..11, "src/ma")));
+        // The cursor in the middle of the message, and of the word: the query
+        // stops at the cursor, the replaced range runs to the end of the word.
+        let text = "see @src/main.rs and more";
+        assert_eq!(mention_query(text, 11), Some((4..16, "src/ma")));
+        assert_eq!(mention_query(text, 20), None);
+        assert_eq!(mention_query("line one\n@doc", 13), Some((9..13, "doc")));
+        // Glued to a word, as in an email address: no list.
+        assert_eq!(mention_query("mail stan@example.com", 21), None);
+        assert_eq!(mention_query("a@", 2), None);
+        assert_eq!(mention_query("@@", 2), None);
+        // A finished mention closes it.
+        assert_eq!(mention_query("@src/main.rs ", 13), None);
+        assert_eq!(mention_query("no mention", 10), None);
+        assert_eq!(
+            mention_query("héllo @é", "héllo @é".len()),
+            Some((7..10, "é"))
+        );
+        assert_eq!(mention_query("abc", 10), None);
+    }
+
+    #[test]
+    fn mention_insertion_text() {
+        assert_eq!(
+            mention_insertion("see @src/ma", &(4..11), "src/main.rs", false),
+            "@src/main.rs "
+        );
+        assert_eq!(mention_insertion("@sr", &(0..3), "src", true), "@src/ ");
+        assert_eq!(
+            mention_insertion("@a and b", &(0..2), "my dir/a.rs", false),
+            "@\"my dir/a.rs\""
+        );
+    }
+
+    #[gpui::test]
+    async fn typing_at_lists_and_inserts_project_paths(cx: &mut gpui::TestAppContext) {
+        let app_state = cx.update(|cx| {
+            let state = workspace::AppState::test(cx);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+            ClaudeCodeSettings::register(cx);
+            state
+        });
+        let fs = app_state.fs.as_fake();
+        fs.insert_tree(
+            path!("/root"),
+            serde_json::json!({
+                "src": { "main.rs": "", "lib.rs": "" },
+                "docs": { "src-map.md": "" },
+                "README.md": "",
+            }),
+        )
+        .await;
+        let project =
+            project::Project::test(app_state.fs.clone(), [path!("/root").as_ref()], cx).await;
+        let (multi_workspace, cx) = cx
+            .add_window_view(|window, cx| workspace::MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        let view = workspace.update_in(cx, |workspace, window, cx| {
+            let project = workspace.project().clone();
+            let workspace = cx.entity();
+            crate::panel::new_view(&workspace, project, None, window, cx)
+        });
+        cx.run_until_parked();
+
+        let labels = |view: &Entity<ClaudeCodeView>, cx: &mut gpui::VisualTestContext| {
+            view.read_with(cx, |view, cx| {
+                view.visible_commands(cx)
+                    .into_iter()
+                    .map(|entry| entry.label.to_string())
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        view.update_in(cx, |view, window, cx| {
+            view.input
+                .update(cx, |input, cx| input.insert("see @", window, cx));
+        });
+        cx.run_until_parked();
+        // No query: the first files.
+        let mut first_files = labels(&view, cx);
+        first_files.sort();
+        assert_eq!(
+            first_files,
+            ["README.md", "docs/src-map.md", "src/lib.rs", "src/main.rs"]
+        );
+
+        view.update_in(cx, |view, window, cx| {
+            view.input
+                .update(cx, |input, cx| input.insert("src/ma", window, cx));
+        });
+        cx.run_until_parked();
+        assert_eq!(labels(&view, cx)[0], "src/main.rs");
+
+        view.update_in(cx, |view, window, cx| {
+            view.input
+                .update(cx, |input, cx| input.set_text("see @sr", window, cx));
+            view.input.update(cx, |input, cx| {
+                input.move_to_end(&editor::actions::MoveToEnd, window, cx)
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(labels(&view, cx)[0], "src/");
+        view.update_in(cx, |view, window, cx| {
+            view.confirm_command(&ConfirmCommand, window, cx);
+            assert_eq!(view.input.read(cx).text(cx), "see @src/ ");
+        });
+        cx.run_until_parked();
+        assert!(labels(&view, cx).is_empty());
+
+        // Escape closes the list until the mention is finished.
+        view.update_in(cx, |view, window, cx| {
+            view.input
+                .update(cx, |input, cx| input.insert("@READ", window, cx));
+        });
+        cx.run_until_parked();
+        assert_eq!(labels(&view, cx), ["README.md"]);
+        view.update_in(cx, |view, window, cx| {
+            view.dismiss_commands(&DismissCommands, window, cx);
+        });
+        assert!(labels(&view, cx).is_empty());
+        view.update_in(cx, |view, window, cx| {
+            view.input
+                .update(cx, |input, cx| input.insert(" @", window, cx));
+        });
+        cx.run_until_parked();
+        assert!(!labels(&view, cx).is_empty());
+        // An email address does not open it.
+        view.update_in(cx, |view, window, cx| {
+            view.input.update(cx, |input, cx| {
+                input.set_text("write to me@exa", window, cx)
+            });
+        });
+        cx.run_until_parked();
+        assert!(labels(&view, cx).is_empty());
     }
 
     #[test]
