@@ -73,7 +73,9 @@ Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the 
 | `ctrl-alt-f` | Toggle Focus view | Claude focused | `claude_code::ToggleFocusView` in `ClaudeCode` context | B-7 | Done |
 | `cmd-shift-t` / `ctrl-shift-t` | Reopen Closed Session | `enableReopenClosedSessionShortcut` and a Claude tab was closed last | `claude_code::ReopenClosedSession` in `Workspace`, replacing `pane::ReopenClosedItem`, which it falls back to | B-7 | Done |
 | `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` in `ClaudeCode` and the Claude input | B-7, B-8 | Partial: the key works; dictation itself is not built (see Voice input) |
-| `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4 | Done |
+| `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4, Panel A-V1 | Done: `use_ctrl_enter_to_send` takes effect since Panel A-V1 fixed the message box's key contexts |
+| `tab` | Accept the suggested prompt | Empty Claude input showing a suggestion | `claude_code::AcceptSuggestion` in `ClaudeCodeInput && has_suggestion > Editor` | Panel A-V1 | Done |
+| `up`, `down`, `enter`, number keys | Pick an option of a permission prompt or a question | The card is focused | `claude_code::SelectPreviousOption`, `SelectNextOption`, `ConfirmOption` in `ClaudeCodePermission` and `ClaudeCodeQuestion`; `cmd-enter` / `ctrl-enter` `SubmitAnswers` and `escape` `DismissQuestion` in `ClaudeCodeQuestion` | Panel A-V7, A-V11 | Done |
 | `escape` | Stop the running turn | Claude focused while running | `claude_code::Interrupt` | B-4 | Done |
 
 ## Settings
@@ -108,6 +110,14 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Done: applied when the sessions list opens; open sessions are never archived |
 | `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Done |
 
+Vireo's own settings, with no extension counterpart:
+
+| Vireo key | Type, default | Behaviour | Item | Status |
+| --- | --- | --- | --- | --- |
+| `new_conversation_opens_in` | `"new_tab"` or `"current"`, `"new_tab"` | Where the new conversation button (+) opens a conversation: a new Claude tab, keeping the current one open, or in place of the current one. An empty conversation is only focused. | Panel B-V2 | Done |
+| `past_conversation_opens_in` | `"new_tab"` or `"current"`, `"new_tab"` | Where a conversation picked from past conversations opens. One already open is brought forward. | Panel B-V2 | Done |
+| `open_on_project_open` | bool, `true` | When a project folder opens, show Claude in the right side bar with the project's newest conversation resumed (or a new one), the message box focused. | Panel B-V4 | Done |
+
 ## Menus and places
 
 | Place | Extension | Vireo | Item | Status |
@@ -128,24 +138,25 @@ Observed in the running extension, version 2.1.328.
 
 | Feature | Extension behaviour | Item | Status |
 | --- | --- | --- | --- |
-| Header | Session title on the left. On the right: bookmarks, session history (clock icon), new conversation (+). | B-4 | Partial: title, focus view, past conversations and new conversation; no bookmarks list |
-| Message list | User messages in a bordered box. Assistant output hangs off a vertical timeline with a dot per step: text, thinking, tool calls. | B-4 | Done |
+| Header | Session title on the left. On the right: bookmarks, session history (clock icon), new conversation (+). | B-4, Panel A-V3a | Partial: title, focus view, past conversations and new conversation, with the extension's 20 px icons in 28 px buttons; no bookmarks list |
+| Message list | User messages in a bordered box. Assistant output hangs off a vertical timeline with a dot per step: text, thinking, tool calls. Opens on the latest messages and follows new ones; a round "↓" button brings you back after scrolling up. | B-4, Panel A-V5, A-V6 | Done: a resumed conversation opens at the bottom and keeps following until you scroll away; the "↓" button shows only while the list is scrolled up |
+| Selecting text | Your messages, Claude's replies and tool blocks can be selected and copied; a copy button on hover copies your whole message. | Panel A-V10 | Done: your messages are shown exactly as typed (no Markdown) and their copy button leaves out the IDE context; tool calls' IN and OUT can be selected, Edit and Write diff lines cannot yet |
 | Markdown | Assistant text renders as Markdown: headings, lists, links, inline code, code blocks. | B-4 | Done |
 | Thinking | Collapsed row "Thought for Ns"; expands to the thinking text. "Thinking…" while it streams. | B-4 | Done |
 | Tool-call blocks | A row naming the tool and its description, e.g. "Bash  Check the build result". Expanded, an IN block shows the input and an OUT block the result. The dot is green on success, red on error, animated while running. | B-4, Polish A-2a | Done: calls start open, as in the extension; output shows 12 lines with "Show more" (up to 40); clicking the row closes it |
 | Edit / Write blocks | File name and a small inline diff of the change. | B-4, Polish A-2a | Done: the path relative to the project, "+added −removed", and the changed lines on red and green backgrounds with shared lines as context; not syntax-highlighted. The full diff opens in the review view (B-5) |
-| Permission prompts | Inline card for a tool that needs approval: "Yes", "Yes, and don't ask again" (or "Yes, allow all edits this session"), and "No" with a "Tell Claude what to do instead" field. Up/down and number keys pick an option. | B-4 | Partial: Yes, Yes and don't ask again (sends the CLI's suggestions), No with a message; number keys are not bound |
+| Permission prompts | Inline card for a tool that needs approval: "Yes", "Yes, and don't ask again" (or "Yes, allow all edits this session"), and "No" with a "Tell Claude what to do instead" field. Up/down and number keys pick an option. | B-4, Panel A-V7 | Done: numbered option rows with the highlighted one marked; the card takes the focus when it appears while you are in the panel; Up and Down move, Enter or a number key chooses, Esc interrupts; the focus goes back to the message box once answered |
 | Plan approval | In plan mode, the plan is shown for approval, with an option to keep planning. | B-4 | Partial: shown as the permission card of the plan tool |
-| AskUserQuestion | Questions from Claude render as a picker with options and free text. | B-4 | Todo: shown as a generic permission card |
+| AskUserQuestion | Questions from Claude render as a picker with options and free text. | B-4, Panel A-V11 | Done: all the questions of one call in one card, each with its header, numbered options and their descriptions (single or multiple choice), an "Other" field and one Submit; the answers go back as `updatedInput.answers` (question text to the chosen labels joined with ", ", or what was typed in Other). Esc or Dismiss tells Claude "The user dismissed the question." |
 | Mode switcher | Button at the bottom right of the input box. Modes: Auto, Manual (`default`), Edit automatically (`acceptEdits`), Plan (`plan`), and Bypass permissions (`bypassPermissions`) only when `allowDangerouslySkipPermissions` is on. Shift+Tab cycles. | B-4 | Done: Auto is always offered, so a conversation that started in another mode can switch to it; `initial_permission_mode` accepts `"auto"` |
 | Model picker | Pill "Opus 5.5 High": model and effort level. Opens a menu of models and effort levels. | B-4 | Partial: models from the CLI; no effort levels |
 | Thinking toggle | In the model / command menu: thinking on or off. | B-4 | Done |
-| Slash commands | "/" button and typing "/" open a menu of commands from the CLI's `slash_commands` list and local actions: clear conversation, new conversation, focus view, account and usage, switch model, and so on. | B-4 | Done: typing "/" at the start of the message, or the / button, opens a list above the message box that filters as you type and scrolls; Up and Down move, Enter or Tab inserts a command (or runs a local action), Escape closes it |
+| Slash commands | "/" button and typing "/" open a menu of commands from the CLI's `slash_commands` list and local actions: clear conversation, new conversation, focus view, account and usage, switch model, and so on. | B-4, Panel A-V1 | Done (the list's keys work since Panel A-V1 fixed their key context): typing "/" at the start of the message, or the / button, opens a list above the message box that filters as you type and scrolls; Up and Down move, Enter or Tab inserts a command (or runs a local action), Escape closes it |
 | @-mentions | Typing "@" opens a fuzzy file and folder picker ("Mention file from this project…"); folders end in "/". `@terminal:name` references a terminal. | B-4, Polish A-1 | Partial: typing "@" at the start of the message or after a space opens a list above the message box with the project's files and folders (folders end in "/"), fuzzy-matched on what follows the "@", at most 50, honouring `respect_git_ignore`; Up and Down move, Enter or Tab inserts `@path `, Escape closes it. An "@" inside a word (an email address) does not open it. "Mention file from this project…" still opens the picker. `@terminal:` is not offered |
 | Attach button (+) | Menu: "Upload from computer" / "Attach file…", "Add context", "Mention file from this project…". | B-4 | Done |
 | Image paste | Pasting or dropping an image adds an image chip; it is sent as a base64 image block. | B-4 | Done |
 | Attachment chips | Chips above the text for the open file, the selection (`file#5-10`), images and mentions; each removable. | B-4 | Done |
-| Prompt suggestions | After a reply, the empty input shows a suggested next prompt in italics; Tab accepts it. | B-4 | Done |
+| Prompt suggestions | After a reply, the empty input shows a suggested next prompt in italics; Tab accepts it. | B-4, Panel A-V1 | Done: Tab fills the message box with the suggestion, cursor at the end (it inserted a tab until Panel A-V1) |
 | Timestamps | Time at the right of each message; a date line when the day changes. | B-4 | Done |
 | Status banner | Banner above the input, e.g. "Browser connected", dismissible. | B-4 | Done |
 | Usage display | Clock icon with time until the session limit resets ("59m"); "Account & usage" shows session and weekly limits. Context usage per conversation. | B-4 | Partial: time to the rate-limit reset, context tokens and cost in a tooltip; no Account & usage view |
@@ -154,7 +165,7 @@ Observed in the running extension, version 2.1.328.
 | Stop | Stop button and Escape interrupt the turn. | B-4 | Done |
 | Focus view | Hides tool calls and thinking; a live indicator names the running tool. | B-4 | Done |
 | Rewind and fork | Hover a user message: "Fork conversation from here", "Rewind code to here", "Fork conversation and rewind code". | B-6 | Done: hover buttons on each prompt; a fork opens in a new tab with `--resume --fork-session --resume-session-at` and the prompt back in the input; rewinding uses the `rewind_files` control request |
-| Copy and bookmark | "Copy response" and "Bookmark response" under each reply; a bookmarks list in the header. | B-4 | Todo |
+| Copy and bookmark | "Copy response" and "Bookmark response" under each reply; a bookmarks list in the header. | B-4 | Todo: replies can be selected and copied, and your own messages have a copy button (Panel A-V10), but there is no "Copy response" button or bookmarks |
 | Sessions list | History button: search ("Search sessions…"), groups, archived sessions, rename, archive, mark unread. | B-6 | Done: `claude_code::ShowSessions` lists this folder's transcripts by last activity, with search, groups, an `archived:` filter and an archive button; rename, group and unread go through the commands above |
 | Session tabs | Several sessions open as editor tabs; unread dot; a closed tab can be reopened. | B-6 | Done |
 | Onboarding | Empty state: "Welcome to Claude Code", a short checklist, and the login choices (claude.ai account, Anthropic Console, third-party providers). | B-8 | Partial: the welcome and the checklist; login runs the CLI's own `claude auth login`, which offers the account choices |
@@ -188,6 +199,18 @@ What changed:
   keymap, or none when the action has no key.
 - **The model is a pill** in the message box.
 
+Batch Panel (A-V3a, A-V7) continued, measuring the extension (2.1.330) from its webview stylesheet
+and components, as screen capture is not allowed on the machine used:
+
+- **Icons at the extension's sizes.** Its header buttons are 20 px icons in 28 px buttons, its "/"
+  and send buttons 26 px. Compared by the drawn glyph, Vireo's header now uses 20 px icons in
+  28 px buttons, the message box's "+" and "/" 16 px icons, and send an 18 px arrow.
+- **The permission card** has numbered option rows, the highlighted one marked, and the keys of the
+  extension: Up and Down, Enter, and the number keys.
+- **The empty state is sparser:** a small logo and one line in the middle, the message box below.
+  The onboarding checklist still shows until `hide_onboarding`.
+- **AskUserQuestion** has its own card (A-V11), in the same style as the permission card.
+
 Before and after, the same conversation:
 
 ![The panel before: tool calls collapsed to one line, an absolute path on the Edit row, large reply text](images/claude-panel-conversation-before.png)
@@ -202,12 +225,13 @@ The empty state, before and after:
 
 Still different from the extension, for a later batch:
 
-- The permission card was not compared. A live permission prompt needs typing into both apps.
-- The extension's empty state is sparser: a small logo, one line, the message box at the bottom.
-  Vireo keeps its checklist until `hide_onboarding`.
+- There are no screenshots of the new permission card and empty state yet: screen capture is not
+  allowed on the machine used, and the offscreen visual test runner needs a full debug build of
+  the app, for which there was not enough disk space.
 - The model pill has no effort level, and the message box has no microphone (see Voice input).
 - The header has no bookmarks button.
 - Diff lines are not syntax-highlighted.
+- The "@" list has only been tested, not looked at in the app.
 
 ## The `claude` process
 
