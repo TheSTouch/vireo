@@ -1841,26 +1841,26 @@
     },
   },
   {
-    "context": "ClaudeCodeInput > Editor && !use_ctrl_enter_to_send",
+    "context": "ClaudeCodeInput && !use_ctrl_enter_to_send > Editor",
     "bindings": {
       "enter": "claude_code::Send",
       "shift-enter": "editor::Newline",
     },
   },
   {
-    "context": "ClaudeCodeInput > Editor && use_ctrl_enter_to_send",
+    "context": "ClaudeCodeInput && use_ctrl_enter_to_send > Editor",
     "bindings": {
       "cmd-enter": "claude_code::Send",
     },
   },
   {
-    "context": "ClaudeCodeInput > Editor && has_suggestion",
+    "context": "ClaudeCodeInput && has_suggestion > Editor",
     "bindings": {
       "tab": "claude_code::AcceptSuggestion",
     },
   },
   {
-    "context": "ClaudeCodeInput > Editor && showing_commands",
+    "context": "ClaudeCodeInput && showing_commands > Editor",
     "bindings": {
       "up": "claude_code::SelectPreviousCommand",
       "down": "claude_code::SelectNextCommand",

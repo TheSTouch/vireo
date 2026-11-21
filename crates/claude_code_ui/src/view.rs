@@ -556,8 +556,10 @@ impl ClaudeCodeView {
         let input_empty = self.input.read(cx).text(cx).is_empty();
         match suggestion {
             Some(suggestion) if input_empty => {
-                self.input
-                    .update(cx, |input, cx| input.set_text(suggestion, window, cx));
+                self.input.update(cx, |input, cx| {
+                    input.set_text(suggestion, window, cx);
+                    input.move_to_end(&editor::actions::MoveToEnd, window, cx);
+                });
             }
             _ => cx.propagate(),
         }
@@ -3221,5 +3223,90 @@ mod tests {
             gpui::size(px(400.), px(800.)),
             |_, _| div().size_full().child(view.clone()),
         );
+    }
+
+    /// A Claude view open in a tab of a test workspace, drawn in its window
+    /// so that keystrokes reach it, with the default keymap bound.
+    async fn view_in_tab(
+        cx: &mut gpui::TestAppContext,
+        entries: Vec<Entry>,
+    ) -> (Entity<ClaudeCodeView>, &mut gpui::VisualTestContext) {
+        let app_state = cx.update(|cx| {
+            let state = workspace::AppState::test(cx);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+            ClaudeCodeSettings::register(cx);
+            let bindings = settings::KeymapFile::load_asset_allow_partial_failure(
+                settings::DEFAULT_KEYMAP_PATH,
+                cx,
+            )
+            .unwrap_or_default();
+            cx.bind_keys(bindings);
+            state
+        });
+        let project = project::Project::test(app_state.fs.clone(), [], cx).await;
+        let (multi_workspace, cx) = cx
+            .add_window_view(|window, cx| workspace::MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        // Built by hand rather than with `panel::open`, so that the session can
+        // start with a transcript the way a resumed one does.
+        let view = workspace.update_in(cx, |workspace, window, cx| {
+            let project = workspace.project().clone();
+            let workspace_entity = cx.entity();
+            let session = cx.new(|cx| {
+                let mut session =
+                    ClaudeSession::new(project.downgrade(), PathBuf::from("/"), None, cx);
+                session.conversation.entries = entries;
+                session
+            });
+            let view = cx.new(|cx| {
+                ClaudeCodeView::new(session, workspace_entity.downgrade(), project, window, cx)
+            });
+            let tab = cx.new(|cx| {
+                crate::panel::ClaudeCodeTab::new(workspace_entity.downgrade(), view.clone(), cx)
+            });
+            workspace.add_item_to_active_pane(Box::new(tab), None, true, window, cx);
+            window.focus(&view.read(cx).input_focus_handle(cx), cx);
+            view
+        });
+        cx.run_until_parked();
+        (view, cx)
+    }
+
+    #[gpui::test]
+    async fn tab_accepts_the_suggested_prompt(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        let session = view.read_with(cx, |view, _| view.session.clone());
+        session.update(cx, |session, cx| {
+            session.conversation.prompt_suggestion = Some("run the tests".into());
+            cx.emit(SessionEvent::Updated);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("tab");
+        view.update_in(cx, |view, window, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "run the tests");
+            // The cursor ends up after the suggestion, so typing continues it.
+            view.input
+                .update(cx, |input, cx| input.insert("!", window, cx));
+            assert_eq!(view.input.read(cx).text(cx), "run the tests!");
+            view.input
+                .update(cx, |input, cx| input.set_text("x", window, cx));
+        });
+        cx.run_until_parked();
+        // With text in the box, Tab is the editor's own again.
+        cx.simulate_keystrokes("tab");
+        view.read_with(cx, |view, cx| {
+            assert_ne!(view.input.read(cx).text(cx), "run the tests");
+        });
+
+        // The "/" list's keys, whose context had the same mistake.
+        view.update_in(cx, |view, window, cx| {
+            view.input
+                .update(cx, |input, cx| input.set_text("/", window, cx));
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("down");
+        view.read_with(cx, |view, _| assert_eq!(view.command_selection, 1));
     }
 }
