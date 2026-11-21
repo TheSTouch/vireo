@@ -92,7 +92,12 @@ pub struct ClaudeCodeView {
     spinner_index: usize,
     banner: Option<SharedString>,
     thinking_enabled: bool,
+    /// The list sticks to its latest message until the person scrolls away,
+    /// and again once they scroll back to the bottom.
     follow_tail: bool,
+    /// The person scrolled since the last frame; the next render works out
+    /// from the new offset whether the list still follows its tail.
+    scrolled_by_user: bool,
     /// The highlighted row of the "/" command list.
     command_selection: usize,
     /// Escape closed the "/" list; it reopens once the message stops being a command.
@@ -192,6 +197,7 @@ impl ClaudeCodeView {
             banner: None,
             thinking_enabled: true,
             follow_tail: true,
+            scrolled_by_user: false,
             command_selection: 0,
             commands_dismissed: false,
             command_scroll: ScrollHandle::new(),
@@ -427,10 +433,6 @@ impl ClaudeCodeView {
     ) {
         match event {
             SessionEvent::Updated => {
-                self.follow_tail = self.is_scrolled_to_bottom();
-                if self.follow_tail {
-                    self.scroll_handle.scroll_to_bottom();
-                }
                 self.ensure_spinner(cx);
                 cx.emit(ViewEvent::TitleChanged);
                 self.refresh_placeholder(window, cx);
@@ -452,6 +454,19 @@ impl ClaudeCodeView {
         let max = self.scroll_handle.max_offset().y;
         let offset = -self.scroll_handle.offset().y;
         offset >= max - px(24.)
+    }
+
+    /// Scrolls the list to its bottom on every frame while it follows its
+    /// tail. A one-off scroll is not enough: a restored transcript is laid out
+    /// before any session event, and replies grow after their first layout
+    /// as their Markdown is parsed in the background.
+    fn update_follow_tail(&mut self) {
+        if std::mem::take(&mut self.scrolled_by_user) {
+            self.follow_tail = self.is_scrolled_to_bottom();
+        }
+        if self.follow_tail {
+            self.scroll_handle.scroll_to_bottom();
+        }
     }
 
     fn ensure_spinner(&mut self, cx: &mut Context<Self>) {
@@ -604,6 +619,7 @@ impl ClaudeCodeView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.follow_tail = true;
         self.scroll_handle.scroll_to_bottom();
         window.focus(&self.focus_handle, cx);
     }
@@ -2344,6 +2360,7 @@ impl Focusable for ClaudeCodeView {
 
 impl Render for ClaudeCodeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.update_follow_tail();
         let entries = self.render_entries(window, cx);
         let empty = entries.is_empty();
         let colors = cx.theme().colors();
@@ -2377,17 +2394,22 @@ impl Render for ClaudeCodeView {
             .on_action(cx.listener(Self::new_conversation_requested))
             .child(self.render_header(cx))
             .child(
-                div()
-                    .id("claude-messages")
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll_handle)
-                    .child(if empty {
-                        self.render_empty_state(cx)
-                    } else {
-                        v_flex().p_2().gap_2().children(entries).into_any_element()
-                    }),
+                div().relative().flex_1().min_h_0().child(
+                    div()
+                        .id("claude-messages")
+                        .size_full()
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll_handle)
+                        .on_scroll(cx.listener(|this, _, _, cx| {
+                            this.scrolled_by_user = true;
+                            cx.notify();
+                        }))
+                        .child(if empty {
+                            self.render_empty_state(cx)
+                        } else {
+                            v_flex().p_2().gap_2().children(entries).into_any_element()
+                        }),
+                ),
             )
             .children(self.render_spinner(cx))
             .child(self.render_input(window, cx))
@@ -3272,6 +3294,53 @@ mod tests {
         });
         cx.run_until_parked();
         (view, cx)
+    }
+
+    fn long_transcript() -> Vec<Entry> {
+        let mut conversation = crate::conversation::Conversation::default();
+        for index in 0..80 {
+            conversation.push_user_prompt(format!("prompt number {index}"), 0, Utc::now());
+        }
+        conversation.entries
+    }
+
+    fn scroll_position(
+        view: &Entity<ClaudeCodeView>,
+        cx: &mut gpui::VisualTestContext,
+    ) -> (gpui::Pixels, gpui::Pixels) {
+        view.read_with(cx, |view, _| {
+            (
+                -view.scroll_handle.offset().y,
+                view.scroll_handle.max_offset().y,
+            )
+        })
+    }
+
+    #[gpui::test]
+    async fn a_resumed_conversation_opens_on_its_latest_messages(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, long_transcript()).await;
+        cx.run_until_parked();
+        let (offset, max) = scroll_position(&view, cx);
+        assert!(max > px(0.), "the transcript overflows the list");
+        assert_eq!(offset, max, "scrolled to the bottom");
+        view.read_with(cx, |view, _| {
+            assert!(view.follow_tail);
+        });
+
+        // New messages are followed.
+        let session = view.read_with(cx, |view, _| view.session.clone());
+        session.update(cx, |session, cx| {
+            session.conversation.push_user_prompt(
+                "one more\nwith\nseveral\nlines".into(),
+                0,
+                Utc::now(),
+            );
+            cx.emit(SessionEvent::Updated);
+        });
+        cx.run_until_parked();
+        let (offset, new_max) = scroll_position(&view, cx);
+        assert!(new_max > max);
+        assert_eq!(offset, new_max);
     }
 
     #[gpui::test]
