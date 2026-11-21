@@ -1875,6 +1875,15 @@
       "enter": "claude_code::DenyPermission",
     },
   },
+  {
+    "context": "ClaudeCodePermission",
+    "bindings": {
+      "up": "claude_code::SelectPreviousOption",
+      "down": "claude_code::SelectNextOption",
+      "enter": "claude_code::ConfirmOption",
+    },
+  },
+  },
   // Claude Code panel: shortcuts of the VS Code extension.
   {
     "context": "Editor && mode == full",

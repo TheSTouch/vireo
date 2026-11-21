@@ -35,6 +35,18 @@ use crate::{
     SelectNextCommand, SelectPreviousCommand, Send, ToggleFocusView, ToggleThinking,
 };
 
+gpui::actions!(
+    claude_code,
+    [
+        /// Moves the highlight of the permission card down.
+        SelectNextOption,
+        /// Moves the highlight of the permission card up.
+        SelectPreviousOption,
+        /// Chooses the highlighted option of the permission card.
+        ConfirmOption,
+    ]
+);
+
 const SPINNER_INTERVAL: Duration = Duration::from_millis(2500);
 const MAX_OUTPUT_LINES: usize = 40;
 /// Output lines a tool call shows before it is opened in full: enough to
@@ -111,6 +123,16 @@ pub struct ClaudeCodeView {
     /// The project's files and folders, listed when an "@" list opens.
     mention_candidates: Option<Arc<Vec<ProjectEntry>>>,
     _mention_matches: Option<Task<()>>,
+    /// Focus of the card answering the first pending permission request, so
+    /// that its options can be chosen with the keyboard.
+    card_focus: FocusHandle,
+    /// The request the card answers, to start each new one afresh.
+    card_request: Option<String>,
+    /// The highlighted option of the permission card.
+    card_selection: usize,
+    /// What the last answer to a permission request sent to the CLI.
+    #[cfg(test)]
+    last_decision: Option<Value>,
     _spinner: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -208,6 +230,11 @@ impl ClaudeCodeView {
             mention: None,
             mention_candidates: None,
             _mention_matches: None,
+            card_focus: cx.focus_handle(),
+            card_request: None,
+            card_selection: 0,
+            #[cfg(test)]
+            last_decision: None,
             _spinner: None,
             _subscriptions: subscriptions,
         };
@@ -437,6 +464,7 @@ impl ClaudeCodeView {
     ) {
         match event {
             SessionEvent::Updated => {
+                self.sync_card(window, cx);
                 self.ensure_spinner(cx);
                 cx.emit(ViewEvent::TitleChanged);
                 self.refresh_placeholder(window, cx);
@@ -447,6 +475,12 @@ impl ClaudeCodeView {
                 }
             }
             SessionEvent::PermissionRequested { request_id } => {
+                let typing_here = self.focus_handle.contains_focused(window, cx)
+                    || self.input.focus_handle(cx).is_focused(window);
+                self.sync_card(window, cx);
+                if typing_here && self.card_request.is_some() {
+                    window.focus(&self.card_focus, cx);
+                }
                 self.open_proposed_diff(request_id.clone(), window, cx);
             }
             SessionEvent::Exited => {}
@@ -729,6 +763,10 @@ impl ClaudeCodeView {
             }
         };
         let request_id = request.request_id.clone();
+        #[cfg(test)]
+        {
+            self.last_decision = serde_json::to_value(&decision).ok();
+        }
         self.session.update(cx, |session, cx| {
             session.respond_permission(&request_id, decision, cx)
         });
@@ -830,6 +868,126 @@ impl ClaudeCodeView {
             .ok();
         })
         .detach();
+    }
+
+    /// Starts the card afresh when the first pending request changes, and
+    /// gives the focus back to the message box once nothing is pending.
+    fn sync_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let active_id = self
+            .pending_permission(cx)
+            .map(|request| request.request_id);
+        if active_id == self.card_request {
+            return;
+        }
+        let card_had_focus = self.card_focus.contains_focused(window, cx);
+        self.card_request = active_id;
+        self.card_selection = 0;
+        if card_had_focus && self.card_request.is_none() {
+            window.focus(&self.input.focus_handle(cx), cx);
+        }
+    }
+
+    fn permission_options(request: &PermissionRequest) -> Vec<(String, PermissionChoice)> {
+        let tool = &request.request;
+        let mut options = vec![("Yes".to_string(), PermissionChoice::Allow)];
+        if !tool.permission_suggestions.is_empty() {
+            let always = if is_edit_tool(&tool.tool_name) {
+                "Yes, allow all edits this session"
+            } else {
+                "Yes, and don't ask again"
+            };
+            options.push((always.to_string(), PermissionChoice::AllowAlways));
+        }
+        options.push((
+            "No, and tell Claude what to do differently".to_string(),
+            PermissionChoice::Deny,
+        ));
+        options
+    }
+
+    fn choose_permission_option(
+        &mut self,
+        option: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(request) = self.pending_permission(cx) else {
+            return;
+        };
+        let Some((_, choice)) = Self::permission_options(&request).get(option).cloned() else {
+            return;
+        };
+        let answer = match choice {
+            PermissionChoice::Allow => Answer::Allow,
+            PermissionChoice::AllowAlways => Answer::AllowAlways,
+            PermissionChoice::Deny => {
+                let message = self.deny_input.read(cx).text(cx);
+                self.deny_input
+                    .update(cx, |input, cx| input.clear(window, cx));
+                Answer::Deny(message)
+            }
+        };
+        self.answer_permission(&request, answer, cx);
+    }
+
+    fn move_card_selection(&mut self, step: isize, cx: &mut Context<Self>) {
+        if let Some(request) = self.pending_permission(cx) {
+            let count = Self::permission_options(&request).len().max(1) as isize;
+            self.card_selection = (self.card_selection as isize + step).rem_euclid(count) as usize;
+        } else {
+            cx.propagate();
+            return;
+        }
+        cx.notify();
+    }
+
+    fn select_next_option(&mut self, _: &SelectNextOption, _: &mut Window, cx: &mut Context<Self>) {
+        self.move_card_selection(1, cx);
+    }
+
+    fn select_previous_option(
+        &mut self,
+        _: &SelectPreviousOption,
+        _: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.move_card_selection(-1, cx);
+    }
+
+    fn confirm_option(&mut self, _: &ConfirmOption, window: &mut Window, cx: &mut Context<Self>) {
+        if self.pending_permission(cx).is_some() {
+            self.choose_permission_option(self.card_selection, window, cx);
+        } else {
+            cx.propagate();
+        }
+    }
+
+    /// Number keys choose an option of the permission card.
+    fn card_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let keystroke = &event.keystroke;
+        if keystroke.modifiers.modified() {
+            return;
+        }
+        let Some(number) = keystroke
+            .key
+            .parse::<usize>()
+            .ok()
+            .filter(|number| *number >= 1)
+        else {
+            return;
+        };
+        let option = number - 1;
+        if let Some(request) = self.pending_permission(cx)
+            && option < Self::permission_options(&request).len()
+        {
+            cx.stop_propagation();
+            self.choose_permission_option(option, window, cx);
+        }
     }
 
     fn paste(&mut self, _: &editor::actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
@@ -1416,22 +1574,15 @@ impl ClaudeCodeView {
                 self.rail(index, cx),
             );
         }
+        let active = self.card_request.as_deref() == Some(request.request_id.as_str());
         let question = tool.title.clone().unwrap_or_else(|| {
             format!(
                 "Allow Claude to use {}?",
                 display_tool_name(&tool.tool_name)
             )
         });
-        let always_label = if is_edit_tool(&tool.tool_name) {
-            "Yes, allow all edits this session"
-        } else {
-            "Yes, and don't ask again"
-        };
-        let has_suggestions = !tool.permission_suggestions.is_empty();
-        let request_for_allow = request.clone();
-        let request_for_always = request.clone();
-        let request_for_deny = request.clone();
-        let deny_input = self.deny_input.clone();
+        let options = Self::permission_options(request);
+        let selected = active.then_some(self.card_selection);
         v_flex()
             .id(("permission", index))
             .w_full()
@@ -1442,6 +1593,10 @@ impl ClaudeCodeView {
             .border_color(colors.border_focused)
             .bg(colors.elevated_surface_background)
             .key_context("ClaudeCodePermission")
+            .when(active, |this| {
+                this.track_focus(&self.card_focus)
+                    .on_key_down(cx.listener(Self::card_key_down))
+            })
             .child(
                 Label::new(question)
                     .size(LabelSize::Small)
@@ -1466,66 +1621,42 @@ impl ClaudeCodeView {
             })
             .child(
                 v_flex()
-                    .gap_1()
-                    .child(
-                        Button::new(("allow", index), "1  Yes")
-                            .full_width()
-                            .style(ButtonStyle::Filled)
-                            .label_size(LabelSize::Small)
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.answer_permission(&request_for_allow, Answer::Allow, cx)
-                            })),
-                    )
-                    .when(has_suggestions, |this| {
-                        this.child(
-                            Button::new(("allow-always", index), format!("2  {always_label}"))
-                                .full_width()
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.answer_permission(
-                                        &request_for_always,
-                                        Answer::AllowAlways,
-                                        cx,
-                                    )
-                                })),
+                    .gap_0p5()
+                    .children(options.into_iter().enumerate().map(|(option, (label, _))| {
+                        option_row(
+                            ("permission-option", option),
+                            option + 1,
+                            None,
+                            label,
+                            None,
+                            selected == Some(option),
+                            cx,
                         )
-                    })
-                    .child(
-                        h_flex()
-                            .gap_1()
-                            .child(
-                                Button::new(
-                                    ("deny", index),
-                                    if has_suggestions { "3  No" } else { "2  No" },
-                                )
-                                .style(ButtonStyle::Subtle)
-                                .label_size(LabelSize::Small)
-                                .on_click(cx.listener(
-                                    move |this, _, window, cx| {
-                                        let message = this.deny_input.read(cx).text(cx);
-                                        this.deny_input
-                                            .update(cx, |input, cx| input.clear(window, cx));
-                                        this.answer_permission(
-                                            &request_for_deny,
-                                            Answer::Deny(message),
-                                            cx,
-                                        )
-                                    },
-                                )),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .px_1()
-                                    .rounded_sm()
-                                    .border_1()
-                                    .border_color(colors.border_variant)
-                                    .key_context("ClaudeCodeDenyInput")
-                                    .child(deny_input),
-                            ),
-                    ),
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.choose_permission_option(option, window, cx)
+                            },
+                        ))
+                    })),
             )
+            .when(active, |this| {
+                this.child(
+                    div()
+                        .ml(px(26.))
+                        .px_1()
+                        .rounded_sm()
+                        .border_1()
+                        .border_color(colors.border_variant)
+                        .bg(colors.editor_background)
+                        .key_context("ClaudeCodeDenyInput")
+                        .child(self.deny_input.clone()),
+                )
+                .child(
+                    Label::new("↑↓ to select · Enter to choose · Esc to cancel")
+                        .size(LabelSize::XSmall)
+                        .color(Color::Muted),
+                )
+            })
             .into_any_element()
     }
 
@@ -2392,19 +2523,22 @@ impl ClaudeCodeView {
         )
     }
 
+    /// Sparse, as in the extension: a small logo and one line in the middle,
+    /// the message box below.
     fn render_empty_state(&self, cx: &App) -> AnyElement {
         let session = self.session.read(cx);
         let settings = ClaudeCodeSettings::get_global(cx);
         let mut content = v_flex()
+            .size_full()
             .items_center()
-            .gap_2()
+            .justify_center()
+            .gap_3()
             .p_4()
             .child(
                 Icon::new(IconName::Sparkle)
-                    .size(IconSize::XLarge)
+                    .size(IconSize::Medium)
                     .color(Color::Accent),
             )
-            .child(Headline::new("Claude Code").size(HeadlineSize::Small))
             .child(
                 Label::new("Ask Claude to explain, edit or build code in this project.")
                     .size(LabelSize::Small)
@@ -2452,6 +2586,13 @@ fn tool_block_markdown_style(window: &Window, cx: &App) -> MarkdownStyle {
     style
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum PermissionChoice {
+    Allow,
+    AllowAlways,
+    Deny,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 enum PlainPart {
     Message,
@@ -2468,6 +2609,7 @@ pub enum Answer {
     Allow,
     AllowWithInput(Value),
     AllowAlways,
+    /// No, with what the person typed, if anything, for Claude to do instead.
     Deny(String),
 }
 
@@ -2480,6 +2622,7 @@ impl Focusable for ClaudeCodeView {
 impl Render for ClaudeCodeView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.update_follow_tail();
+        self.sync_card(window, cx);
         let entries = self.render_entries(window, cx);
         let empty = entries.is_empty();
         let jump_to_bottom = self.render_jump_to_bottom(cx);
@@ -2510,6 +2653,9 @@ impl Render for ClaudeCodeView {
             .on_action(cx.listener(Self::allow_permission))
             .on_action(cx.listener(Self::allow_permission_always))
             .on_action(cx.listener(Self::deny_permission))
+            .on_action(cx.listener(Self::select_next_option))
+            .on_action(cx.listener(Self::select_previous_option))
+            .on_action(cx.listener(Self::confirm_option))
             .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::new_conversation_requested))
             .child(self.render_header(cx))
@@ -2599,6 +2745,70 @@ fn timeline_row(
             )
         })
         .into_any_element()
+}
+
+/// A numbered option of the permission card. `chosen`, when given, shows
+/// whether the option is checked.
+fn option_row(
+    id: impl Into<ElementId>,
+    number: usize,
+    chosen: Option<bool>,
+    label: String,
+    description: Option<String>,
+    highlighted: bool,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
+    let colors = cx.theme().colors();
+    h_flex()
+        .id(id)
+        .items_start()
+        .gap_2()
+        .px_2()
+        .py_0p5()
+        .rounded_sm()
+        .cursor_pointer()
+        .when(highlighted, |this| this.bg(colors.element_selected))
+        .hover(|this| this.bg(colors.element_hover))
+        .child(option_marker(number, chosen))
+        .child(
+            v_flex()
+                .min_w_0()
+                .child(Label::new(label).size(LabelSize::Small))
+                .when_some(description, |this, description| {
+                    this.child(
+                        Label::new(description)
+                            .size(LabelSize::XSmall)
+                            .color(Color::Muted),
+                    )
+                }),
+        )
+}
+
+fn option_marker(number: usize, chosen: Option<bool>) -> impl IntoElement {
+    h_flex()
+        .flex_none()
+        .w(px(30.))
+        .gap_0p5()
+        .child(
+            Label::new(format!("{number}."))
+                .size(LabelSize::Small)
+                .color(Color::Muted),
+        )
+        .when_some(chosen, |this, chosen| {
+            this.child(
+                Icon::new(if chosen {
+                    IconName::Check
+                } else {
+                    IconName::Circle
+                })
+                .size(IconSize::XSmall)
+                .color(if chosen {
+                    Color::Accent
+                } else {
+                    Color::Disabled
+                }),
+            )
+        })
 }
 
 fn chip(
@@ -3544,6 +3754,79 @@ mod tests {
             cx.read_from_clipboard().and_then(|item| item.text()),
             Some(typed.to_string())
         );
+    }
+
+    fn request_permission(
+        view: &Entity<ClaudeCodeView>,
+        line: &str,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        let session = view.read_with(cx, |view, _| view.session.clone());
+        let message = crate::protocol::CliMessage::parse(line).unwrap();
+        session.update(cx, |session, cx| {
+            session.conversation.apply(message, Utc::now());
+            let request_id = session
+                .conversation
+                .pending_permissions()
+                .last()
+                .map(|request| request.request_id.clone())
+                .unwrap_or_default();
+            cx.emit(SessionEvent::PermissionRequested { request_id });
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    async fn permission_options_are_chosen_with_the_keyboard(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        request_permission(
+            &view,
+            r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"},"permission_suggestions":[{"type":"addRules"}]}}"#,
+            cx,
+        );
+        view.update_in(cx, |view, window, _| {
+            assert!(
+                view.card_focus.is_focused(window),
+                "the card takes the keys"
+            );
+            assert_eq!(view.card_selection, 0);
+        });
+        cx.simulate_keystrokes("down down");
+        view.read_with(cx, |view, _| assert_eq!(view.card_selection, 2));
+        // Past the last option the highlight wraps to the first.
+        cx.simulate_keystrokes("down");
+        view.read_with(cx, |view, _| assert_eq!(view.card_selection, 0));
+        cx.simulate_keystrokes("down enter");
+        view.update_in(cx, |view, window, cx| {
+            assert_eq!(
+                view.last_decision,
+                Some(serde_json::json!({
+                    "behavior": "allow",
+                    "updatedInput": {"command": "ls"},
+                    "updatedPermissions": [{"type": "addRules"}],
+                }))
+            );
+            assert!(
+                view.input.focus_handle(cx).is_focused(window),
+                "back to the message box"
+            );
+        });
+
+        // Number keys choose directly: 2 is "No" when there is no "always".
+        request_permission(
+            &view,
+            r#"{"type":"control_request","request_id":"r2","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"rm x"}}}"#,
+            cx,
+        );
+        cx.simulate_keystrokes("2");
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.last_decision
+                    .as_ref()
+                    .and_then(|decision| decision.get("behavior")),
+                Some(&serde_json::json!("deny"))
+            );
+        });
     }
 
     #[gpui::test]
