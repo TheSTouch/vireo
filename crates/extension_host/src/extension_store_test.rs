@@ -1288,6 +1288,43 @@ async fn test_extension_store_with_test_extension(cx: &mut TestAppContext) {
     );
 }
 
+// The store starts watching `installed/` in one task while its first index
+// rebuild creates that folder in another. Each seed orders them differently;
+// in every order, a later change on disk must reach the store without waiting
+// for the watcher's poll fallback (`fs::fs_watcher::poll_interval`).
+#[gpui::test(iterations = 32)]
+async fn test_store_sees_changes_in_installed_dir_it_created(cx: &mut TestAppContext) {
+    init_test(cx);
+    let (store, fs) = create_extension_store(cx);
+    let installed_extensions = |cx: &mut TestAppContext| {
+        store.read_with(cx, |store, _| {
+            store
+                .installed_extensions()
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+    };
+
+    insert_remote_relevant_extension(&fs, "foo").await;
+    cx.executor().advance_clock(RELOAD_DEBOUNCE_DURATION);
+    cx.run_until_parked();
+    assert_eq!(installed_extensions(cx), vec![Arc::<str>::from("foo")]);
+
+    fs.remove_dir(
+        Path::new("/extensions/installed/foo"),
+        RemoveOptions {
+            recursive: true,
+            ignore_if_not_exists: false,
+        },
+    )
+    .await
+    .unwrap();
+    cx.executor().advance_clock(RELOAD_DEBOUNCE_DURATION);
+    cx.run_until_parked();
+    assert_eq!(installed_extensions(cx), Vec::<Arc<str>>::new());
+}
+
 fn init_test(cx: &mut TestAppContext) {
     cx.update(|cx| {
         let store = SettingsStore::test(cx);

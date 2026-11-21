@@ -516,6 +516,10 @@ impl ExtensionStore {
             let reload_tx = this.reload_tx.clone();
             let installed_dir = this.installed_dir.clone();
             async move {
+                // The first index rebuild also creates this folder, but in another
+                // task. A watch on a missing folder only starts at the watcher's next
+                // poll (seconds later), so changes made before then would be missed.
+                fs.create_dir(&installed_dir).await.log_err();
                 let (mut paths, _) = fs.watch(&installed_dir, FS_WATCH_LATENCY).await;
                 while let Some(events) = paths.next().await {
                     for event in events {
@@ -523,11 +527,19 @@ impl ExtensionStore {
                             continue;
                         };
 
-                        if let Some(path::Component::Normal(extension_dir_name)) =
-                            event_path.components().next()
-                            && let Some(extension_id) = extension_dir_name.to_str()
-                        {
-                            reload_tx.unbounded_send(Some(extension_id.into())).ok();
+                        match event_path.components().next() {
+                            Some(path::Component::Normal(extension_dir_name)) => {
+                                if let Some(extension_id) = extension_dir_name.to_str() {
+                                    reload_tx.unbounded_send(Some(extension_id.into())).ok();
+                                }
+                            }
+                            // An event on the folder itself (its late registration, or a
+                            // rescan after dropped events) can hide changes to any
+                            // extension, so rebuild the whole index.
+                            None => {
+                                reload_tx.unbounded_send(None).ok();
+                            }
+                            Some(_) => {}
                         }
                     }
                 }
@@ -890,6 +902,13 @@ impl ExtensionStore {
                     .get(url.as_ref(), Default::default(), true)
                     .await
                     .context("downloading extension")?;
+                // Unpacking an error page would fail later with a gzip error that
+                // hides the status, after the fallback path has emptied the
+                // extension's folder.
+                let status = response.status();
+                if !status.is_success() {
+                    bail!("downloading extension: status {}", status.as_u16());
+                }
 
                 let content_length = response
                     .headers()
