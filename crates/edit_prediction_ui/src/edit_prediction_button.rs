@@ -108,7 +108,7 @@ impl Render for EditPredictionButton {
                 if let Status::Error(e) = status {
                     return div().child(
                         IconButton::new("copilot-error", icon)
-                            .icon_size(IconSize::Small)
+                            .icon_size(workspace::CODICON_SIZE)
                             .tab_index(0isize)
                             .aria_label("GitHub Copilot")
                             .on_click(cx.listener(move |_, _, window, cx| {
@@ -183,6 +183,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger_with_tooltip(
                             IconButton::new("copilot-icon", icon)
+                                .icon_size(workspace::CODICON_SIZE)
                                 .tab_index(0isize)
                                 .aria_label("GitHub Copilot"),
                             |_window, cx| {
@@ -235,6 +236,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger_with_tooltip(
                             IconButton::new("codestral-icon", IconName::AiMistral)
+                                .icon_size(workspace::CODICON_SIZE)
                                 .shape(IconButtonShape::Square)
                                 .tab_index(0isize)
                                 .aria_label("Edit Prediction")
@@ -281,6 +283,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger(
                             IconButton::new("openai-compatible-api-icon", IconName::AiOpenAiCompat)
+                                .icon_size(workspace::CODICON_SIZE)
                                 .shape(IconButtonShape::Square)
                                 .tab_index(0isize)
                                 .aria_label("Edit Prediction")
@@ -313,6 +316,7 @@ impl Render for EditPredictionButton {
                         .anchor(Anchor::BottomRight)
                         .trigger_with_tooltip(
                             IconButton::new("ollama-icon", IconName::AiOllama)
+                                .icon_size(workspace::CODICON_SIZE)
                                 .shape(IconButtonShape::Square)
                                 .tab_index(0isize)
                                 .aria_label("Edit Prediction")
@@ -403,6 +407,7 @@ impl Render for EditPredictionButton {
 
                     return div().child(
                         IconButton::new("zed-predict-pending-button", ep_icon)
+                            .icon_size(workspace::CODICON_SIZE)
                             .shape(IconButtonShape::Square)
                             .tab_index(0isize)
                             .aria_label("Edit Predictions")
@@ -475,6 +480,7 @@ impl Render for EditPredictionButton {
                     || zed_cloud_has_no_active_subscription;
 
                 let icon_button = IconButton::new("zed-predict-pending-button", ep_icon)
+                    .icon_size(workspace::CODICON_SIZE)
                     .shape(IconButtonShape::Square)
                     .tab_index(0isize)
                     .aria_label("Edit Prediction")

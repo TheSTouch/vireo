@@ -37,9 +37,9 @@ impl Render for DiagnosticIndicator {
         // "(x) 0 /!\ 0".
         let diagnostic_indicator = h_flex()
             .gap_1()
-            .child(Icon::new(IconName::XCircle).size(IconSize::Small))
+            .child(Icon::new(IconName::XCircle).size(workspace::CODICON_SIZE))
             .child(Label::new(self.summary.error_count.to_string()).size(LabelSize::Small))
-            .child(Icon::new(IconName::Warning).size(IconSize::Small))
+            .child(Icon::new(IconName::Warning).size(workspace::CODICON_SIZE))
             .child(Label::new(self.summary.warning_count.to_string()).size(LabelSize::Small));
 
         let status = if let Some(diagnostic) = &self.current_diagnostic {

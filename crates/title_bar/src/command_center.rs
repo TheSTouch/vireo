@@ -27,6 +27,10 @@ pub(crate) fn command_center_label(project_name: Option<&str>) -> SharedString {
 
 /// VS Code's workbench colors for the command center, derived from the title
 /// bar's text color so they follow any theme: 5% fill, 20% border.
+/// VS Code's command center draws its search icon at 14 px next to a 13 px
+/// UI font.
+const SEARCH_ICON_SIZE: IconSize = IconSize::Custom(gpui::Rems(14. / 13.));
+
 pub(crate) fn command_center_colors(foreground: Hsla) -> (Hsla, Hsla) {
     (foreground.opacity(0.05), foreground.opacity(0.2))
 }
@@ -47,13 +51,13 @@ pub(crate) fn render_command_center(project_name: Option<SharedString>, cx: &App
         .min_w(px(COMMAND_CENTER_MIN_WIDTH))
         .child(
             IconButton::new("command-center-back", IconName::ArrowLeft)
-                .icon_size(IconSize::Small)
+                .icon_size(workspace::CODICON_SIZE)
                 .tooltip(|_window, cx| Tooltip::for_action("Go Back", &GoBack, cx))
                 .on_click(|_, window, cx| window.dispatch_action(GoBack.boxed_clone(), cx)),
         )
         .child(
             IconButton::new("command-center-forward", IconName::ArrowRight)
-                .icon_size(IconSize::Small)
+                .icon_size(workspace::CODICON_SIZE)
                 .tooltip(|_window, cx| Tooltip::for_action("Go Forward", &GoForward, cx))
                 .on_click(|_, window, cx| window.dispatch_action(GoForward.boxed_clone(), cx)),
         )
@@ -74,7 +78,7 @@ pub(crate) fn render_command_center(project_name: Option<SharedString>, cx: &App
                 .hover(move |style| style.bg(foreground.opacity(0.08)))
                 .child(
                     Icon::new(IconName::MagnifyingGlass)
-                        .size(IconSize::XSmall)
+                        .size(SEARCH_ICON_SIZE)
                         .color(Color::Muted),
                 )
                 .child(
@@ -179,7 +183,7 @@ pub(crate) fn render_layout_controls(
         let action = toggle.action();
         let tooltip_action = action.boxed_clone();
         IconButton::new(toggle.id(), toggle.icon(state))
-            .icon_size(IconSize::Small)
+            .icon_size(workspace::CODICON_SIZE)
             .tooltip(move |_window, cx| {
                 Tooltip::for_action(toggle.label(), tooltip_action.as_ref(), cx)
             })

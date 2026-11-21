@@ -1463,7 +1463,7 @@ impl Render for LspButton {
                 .trigger_with_tooltip(
                     IconButton::new("zed-lsp-tool-button", IconName::BoltOutlined)
                         .when_some(indicator, IconButton::indicator)
-                        .icon_size(IconSize::Small)
+                        .icon_size(workspace::CODICON_SIZE)
                         .tab_index(0isize)
                         .aria_label("Language Servers")
                         .when(is_restricted, |s| s.icon_color(Color::Warning))

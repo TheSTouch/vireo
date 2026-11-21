@@ -21,6 +21,11 @@ use ui::{ContextMenu, Divider, IconPosition, Indicator, Tooltip, prelude::*, rig
 /// display).
 const STATUS_BAR_HEIGHT: Pixels = px(22.);
 
+/// The size of VS Code's Codicons in its status bar and title bar: 16 px next
+/// to its 13 px UI font. Relative to Vireo's UI font, so that the icons grow
+/// with it as VS Code's grow with its zoom.
+pub const CODICON_SIZE: IconSize = IconSize::Custom(gpui::Rems(16. / 13.));
+
 /// VS Code's remote indicator: the colored block at the status bar's left
 /// end, which opens the remote connection menu. Its fill reaches the
 /// window's bottom-left corner, so it is rounded like the window there.
@@ -38,7 +43,7 @@ fn render_remote_indicator(round_bottom_left: bool, cx: &App) -> impl IntoElemen
         .cursor_pointer()
         .child(
             Icon::new(IconName::Remote)
-                .size(IconSize::Small)
+                .size(CODICON_SIZE)
                 .color(Color::Custom(foreground)),
         )
         .tooltip(|_window, cx| {
@@ -307,7 +312,7 @@ impl StatusBar {
                         IconName::ThreadsSidebarLeftClosed
                     },
                 )
-                .icon_size(IconSize::Small)
+                .icon_size(CODICON_SIZE)
                 .tab_index(0isize)
                 .aria_label("Open threads sidebar")
                 .when(has_notifications, |this| {

@@ -763,7 +763,7 @@ impl Render for ActivityIndicator {
                         ActivityIcon::LoadingSpinner => this.loading(true),
                         ActivityIcon::Icon(icon_name) => this.start_icon(
                             Icon::new(icon_name)
-                                .size(IconSize::Small)
+                                .size(workspace::CODICON_SIZE)
                                 .color(Color::Muted),
                         ),
                     })

@@ -8,7 +8,7 @@ use gpui::{
 };
 use project::git_store::{GitStore, GitStoreEvent};
 use settings::Settings as _;
-use ui::{ButtonLike, Icon, IconName, IconSize, Label, LabelSize, Tooltip, prelude::*};
+use ui::{ButtonLike, Icon, IconName, Label, LabelSize, Tooltip, prelude::*};
 use workspace::{HideStatusItem, StatusBarSettings, StatusItemView, Workspace, item::ItemHandle};
 
 /// The branch as VS Code labels it: its name, with `*` when there are
@@ -78,7 +78,7 @@ impl Render for BranchStatus {
                     .child(
                         h_flex()
                             .gap_1()
-                            .child(Icon::new(IconName::GitBranch).size(IconSize::Small))
+                            .child(Icon::new(IconName::GitBranch).size(workspace::CODICON_SIZE))
                             .child(Label::new(label).size(LabelSize::Small)),
                     )
                     .tooltip(|_window, cx| {
@@ -102,7 +102,7 @@ impl Render for BranchStatus {
                         .child(
                             h_flex()
                                 .gap_1()
-                                .child(Icon::new(IconName::Sync).size(IconSize::Small))
+                                .child(Icon::new(IconName::Sync).size(workspace::CODICON_SIZE))
                                 .children(
                                     sync_label(tracking)
                                         .map(|label| Label::new(label).size(LabelSize::Small)),
