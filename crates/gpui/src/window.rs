@@ -8648,6 +8648,79 @@ mod tests {
         }
     }
 
+    /// An unfocused but visible window must keep showing content that arrives
+    /// while it is inactive (a streamed reply, a terminal's output): the
+    /// inactive frame limit may delay a frame, never drop it. The platform here
+    /// only delivers a frame request after GPUI asks for one, as macOS does once
+    /// its Metal display link pauses.
+    #[gpui::test]
+    fn test_inactive_window_draws_dirty_view_within_inactive_interval(cx: &mut TestAppContext) {
+        use scheduler::Instant;
+
+        struct CountingView {
+            renders: Rc<Cell<usize>>,
+        }
+
+        impl Render for CountingView {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                div()
+            }
+        }
+
+        // Test mode draws during effect flushing, bypassing platform frame throttling.
+        cx.app.borrow_mut().mode = crate::app::GpuiMode::Production;
+        let inactive_interval = Duration::from_millis(40);
+        let renders = Rc::new(Cell::new(0));
+        let window = cx
+            .app
+            .borrow_mut()
+            .open_window(
+                WindowOptions {
+                    inactive_frame_interval: Some(inactive_interval),
+                    ..Default::default()
+                },
+                {
+                    let renders = renders.clone();
+                    |_, cx| cx.new(|_| CountingView { renders })
+                },
+            )
+            .expect("open test window");
+        let platform_window = cx.test_window(window.into());
+        platform_window.simulate_active_status_change(false);
+        platform_window.simulate_frame_request(RequestFrameOptions::default());
+
+        for update in 0..3 {
+            let renders_before = renders.get();
+            let wakes_before = platform_window.frame_wake_count();
+            window
+                .update(cx, |_, _, cx| cx.notify())
+                .expect("notify the view");
+            let notified_at = Instant::now();
+            assert!(
+                platform_window.frame_wake_count() > wakes_before,
+                "update {update}: notifying an idle inactive window must ask for a frame"
+            );
+
+            loop {
+                let wakes_before_request = platform_window.frame_wake_count();
+                platform_window.simulate_frame_request(RequestFrameOptions::default());
+                if renders.get() > renders_before {
+                    break;
+                }
+                assert!(
+                    platform_window.frame_wake_count() > wakes_before_request,
+                    "update {update}: a throttled frame must ask for another frame request"
+                );
+                assert!(
+                    notified_at.elapsed() < inactive_interval * 10,
+                    "update {update}: the inactive window never drew its dirty view"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        }
+    }
+
     /// A stale cache is only visible if the snapshot reports GPUI's cached
     /// value separately from what the platform reports now.
     #[gpui::test]
