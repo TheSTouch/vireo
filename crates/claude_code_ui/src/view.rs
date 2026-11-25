@@ -4598,4 +4598,42 @@ mod tests {
             assert_ne!(view.input.read(cx).text(cx), "run the tests");
         });
     }
+
+    /// V-12: an AskUserQuestion request exactly as `claude` 2.1.329 sent it,
+    /// with the fields V-11's fixture lacks (`display_name`, `tool_use_id`,
+    /// `requires_user_interaction`). Answered with this payload, the live CLI
+    /// gave Claude the tool result `"What is your favourite colour?"="Green",
+    /// "Which fruits do you like?"="Apple, Banana"` and Claude carried on.
+    const LIVE_ASK_USER_QUESTION: &str = r#"{"type":"control_request","request_id":"b6f4ec5f-c863-452f-b0cd-b1ce74a6cdb5","request":{"subtype":"can_use_tool","tool_name":"AskUserQuestion","display_name":"AskUserQuestion","input":{"questions":[{"question":"What is your favourite colour?","header":"Colour","options":[{"label":"Blue","description":"A cool, calm colour."},{"label":"Green","description":"The colour of nature."},{"label":"Red","description":"A bold, warm colour."}],"multiSelect":false},{"question":"Which fruits do you like?","header":"Fruits","options":[{"label":"Apple","description":"Crisp and common."},{"label":"Banana","description":"Soft and easy to peel."},{"label":"Cherry","description":"Small and sweet."}],"multiSelect":true}]},"tool_use_id":"toolu_018iQ3SouaKGrXf3rwuxTvFP","requires_user_interaction":true}}"#;
+
+    #[gpui::test]
+    async fn a_live_ask_user_question_request_is_answered(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        request_permission(&view, LIVE_ASK_USER_QUESTION, cx);
+        view.read_with(cx, |view, _| {
+            let form = view
+                .question_form
+                .as_ref()
+                .expect("the picker, not the generic card");
+            assert_eq!(form.questions.len(), 2);
+            assert_eq!(form.questions[0].header, "Colour");
+            assert_eq!(form.questions[1].options[2].description, "Small and sweet.");
+            assert!(form.questions[1].multi_select);
+        });
+        // Green, then Apple and Banana, then submit.
+        cx.simulate_keystrokes("2 enter down enter cmd-enter");
+        view.read_with(cx, |view, _| {
+            let mut expected: Value = serde_json::from_str::<Value>(LIVE_ASK_USER_QUESTION)
+                .unwrap()["request"]["input"]
+                .clone();
+            expected["answers"] = serde_json::json!({
+                "What is your favourite colour?": "Green",
+                "Which fruits do you like?": "Apple, Banana",
+            });
+            assert_eq!(
+                view.last_decision,
+                Some(serde_json::json!({"behavior": "allow", "updatedInput": expected}))
+            );
+        });
+    }
 }
