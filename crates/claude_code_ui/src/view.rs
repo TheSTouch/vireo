@@ -2388,6 +2388,9 @@ impl ClaudeCodeView {
         if settings.use_ctrl_enter_to_send {
             key_context.add("use_ctrl_enter_to_send");
         }
+        if settings.escape_stops_claude {
+            key_context.add("escape_stops_claude");
+        }
         if self.shown_suggestion(cx).is_some() {
             key_context.add("has_suggestion");
         }
@@ -3196,8 +3199,13 @@ impl Render for ClaudeCodeView {
         let colors = cx.theme().colors();
         let mut key_context = KeyContext::default();
         key_context.add("ClaudeCode");
-        if ClaudeCodeSettings::get_global(cx).enable_new_conversation_shortcut {
+        let settings = ClaudeCodeSettings::get_global(cx);
+        if settings.enable_new_conversation_shortcut {
             key_context.add("new_conversation_shortcut");
+        }
+        // The Stop button dispatches `Interrupt` whatever the setting.
+        if settings.escape_stops_claude {
+            key_context.add("escape_stops_claude");
         }
         v_flex()
             .size_full()
@@ -4882,6 +4890,67 @@ mod tests {
         cx.run_until_parked();
         view.read_with(cx, |view, _| {
             assert_eq!(view.attachments, vec![Attachment::Mention(path.clone())]);
+        });
+    }
+
+    fn escape_interrupts(view: &Entity<ClaudeCodeView>, cx: &mut gpui::VisualTestContext) -> bool {
+        cx.update(|window, cx| {
+            let input = view.read(cx).input_focus_handle(cx);
+            window
+                .bindings_for_action_in(&Interrupt, &input)
+                .iter()
+                .any(|binding| {
+                    binding.keystrokes().len() == 1 && binding.keystrokes()[0].key() == "escape"
+                })
+        })
+    }
+
+    /// V-16: Escape stops Claude only while `escape_stops_claude` is on; the
+    /// Stop button keeps working, and Escape still declines a permission
+    /// request.
+    #[gpui::test]
+    async fn escape_stops_claude_follows_the_setting(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        assert!(
+            escape_interrupts(&view, cx),
+            "on by default, in the message box"
+        );
+
+        cx.update(|_, cx| {
+            cx.update_global::<settings::SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings
+                        .claude_code
+                        .get_or_insert_default()
+                        .escape_stops_claude = Some(false);
+                });
+            });
+        });
+        cx.run_until_parked();
+        assert!(
+            !escape_interrupts(&view, cx),
+            "off: Escape does not stop Claude"
+        );
+        cx.update(|window, cx| {
+            assert!(
+                window.is_action_available(&Interrupt, cx),
+                "the Stop button still has its handler"
+            );
+        });
+
+        request_permission(
+            &view,
+            r#"{"type":"control_request","request_id":"r1","request":{"subtype":"can_use_tool","tool_name":"Bash","input":{"command":"ls"}}}"#,
+            cx,
+        );
+        cx.simulate_keystrokes("escape");
+        view.read_with(cx, |view, _| {
+            assert_eq!(
+                view.last_decision
+                    .as_ref()
+                    .and_then(|decision| decision.get("behavior")),
+                Some(&serde_json::json!("deny"))
+            );
         });
     }
 }

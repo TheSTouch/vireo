@@ -1829,15 +1829,25 @@
   {
     "context": "ClaudeCode",
     "bindings": {
-      "escape": "claude_code::Interrupt",
       "shift-tab": "claude_code::CycleMode",
+    },
+  },
+  {
+    "context": "ClaudeCode && escape_stops_claude",
+    "bindings": {
+      "escape": "claude_code::Interrupt",
     },
   },
   {
     "context": "ClaudeCodeInput > Editor",
     "bindings": {
-      "escape": "claude_code::Interrupt",
       "shift-tab": "claude_code::CycleMode",
+    },
+  },
+  {
+    "context": "ClaudeCodeInput && escape_stops_claude > Editor",
+    "bindings": {
+      "escape": "claude_code::Interrupt",
     },
   },
   {
@@ -1878,6 +1888,7 @@
   {
     "context": "ClaudeCodePermission",
     "bindings": {
+      "escape": "claude_code::DenyPermission",
       "up": "claude_code::SelectPreviousOption",
       "down": "claude_code::SelectNextOption",
       "enter": "claude_code::ConfirmOption",

@@ -2142,6 +2142,9 @@
     "use_python_environment": true,
     // Show "Fix with Claude Code" where the editor reports something to fix.
     "show_fix_actions": true,
+    // Escape stops Claude while it works; when off, only the Stop button does.
+    // Escape still closes menus and declines permission requests and questions.
+    "escape_stops_claude": true,
   },
   // Settings specific to journaling
   "journal": {

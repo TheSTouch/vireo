@@ -130,6 +130,12 @@ pub struct ClaudeCodeSettingsContent {
     ///
     /// Default: true
     pub show_fix_actions: Option<bool>,
+    /// Pressing Escape in the Claude panel stops Claude while it works. When
+    /// off, only the Stop button does. Escape still closes menus and
+    /// dialogs, and declines permission requests and questions.
+    ///
+    /// Default: true
+    pub escape_stops_claude: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]
