@@ -104,6 +104,19 @@ so far ("Open" lists what the owner may still change before a session starts it)
   box.
 
 
+### V-22. Pasting an image or a file in the message box inserts its name
+
+- **Seen on 2026-11-25:** the owner: "I can't paste images or files in the Claude prompt input, it
+  just puts the name and not the file."
+- **Cause:** `ClaudeCodeView::paste` (`view.rs` ~1322) listens for `editor::Paste` on the view's
+  root, so the message box's editor runs Paste first (`editor/src/clipboard.rs` ~252) and never
+  passes it on: images and files copied in Finder never reach Vireo's handler. Also, macOS's
+  clipboard reader (`gpui_macos/src/pasteboard.rs` ~59, `read`) returns the text alone when an image
+  comes with a text flavour (a browser's "Copy Image"). Dropping files on the panel is not handled
+  either, though `claude-parity.md` says "pasting or dropping an image" works.
+- **Expected:** a pasted or dropped image becomes an image chip, a pasted or dropped file or folder
+  an `@` chip; text pastes as before.
+
 ## Done
 
 - V-1, Tab accepts the suggested prompt (the message box's key contexts were never matched, which
