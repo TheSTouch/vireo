@@ -18,7 +18,7 @@ The column "Item" names the work item of the Foundation batch that owns the row 
 
 ## Commands
 
-The extension declares 31 commands. Vireo exposes them as `claude_code::*` actions.
+The extension declares 31 commands (34 in 2.1.331, whose three new ones are at the end of the table). Vireo exposes them as `claude_code::*` actions.
 
 | Extension command | Title | Behaviour | Vireo action | Item | Status |
 | --- | --- | --- | --- | --- | --- |
@@ -53,6 +53,9 @@ The extension declares 31 commands. Vireo exposes them as `claude_code::*` actio
 | `claude-vscode.markSessionUnread` | Mark Session as Unread | Marks the session tab unread. | `claude_code::MarkSessionUnread` | B-6 | Done |
 | `claude-vscode.renameSessionTab` | Rename Session Tab | Renames the session. | `claude_code::RenameSession` | B-6 | Done |
 | `claude-vscode.addSessionTabToGroup` | Add Session Tab to Group | Puts the session in a named group of the sessions list. | `claude_code::AddSessionToGroup` | B-6 | Done |
+| `claude-vscode.fixTestFailure` | Fix with Claude Code | On a failed test's message (Testing view and the inline message), asks Claude to fix the failure. Shown while `showFixActions` is on. Added in 2.1.331. | none | V-19 | Todo |
+| `claude-vscode.resolveMergeConflicts` | Resolve Merge Conflicts | Editor title button on a file with conflicts, and the Git "Merge Changes" group's menu: asks Claude to resolve the merge conflicts. Added in 2.1.331. | none | V-20 | Todo |
+| `claude-vscode.addCellToChat` | Add Cell to Chat | Notebook cell title menu: adds the cell to the message box, like Add to Chat for a file. Added in 2.1.331. | none | V-21 | Todo |
 
 The extension also binds `claude-vscode.terminal.open.keyboard`, an internal variant of "Open in
 Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the voice dictation key
@@ -109,6 +112,10 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | `spinnerVerbs` | `{mode: append or replace, verbs: []}` | Verbs shown while Claude works. | `spinner_verbs` | B-4 | Done |
 | `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Done: applied when the sessions list opens; open sessions are never archived |
 | `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Done |
+| `escapeStopsClaude` | bool, `true` | Escape in the Claude panel stops Claude while it works; when off, only the Stop button does. Escape still closes menus and dialogs and declines permission requests and questions. Added in 2.1.331. | `escape_stops_claude` | V-16 | Todo: Escape always stops a running turn |
+| `pinPrompt` | bool, `true` | Your message stays pinned at the top of the conversation while you scroll through Claude's reply to it; when off, it scrolls away. Added in 2.1.331. | `pin_prompt` | V-17 | Todo: the message scrolls away |
+| `contextUsageThreshold` | number 0 to 100, `50` | The context usage indicator shows below the message box once more than this percentage of the context window is used; 0 shows it from the first reply. Added in 2.1.331. | `context_usage_threshold` | V-18 | Todo: context tokens only in a tooltip |
+| `showFixActions` | bool, `true` | Shows "Fix with Claude Code" where the editor reports something to fix (failed test messages). Added in 2.1.331. | `show_fix_actions` | V-19 | Todo |
 
 Vireo's own settings, with no extension counterpart:
 

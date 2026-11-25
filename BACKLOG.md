@@ -21,22 +21,6 @@ so far ("Open" lists what the owner may still change before a session starts it)
   - look at the "@" list in the app (only tested so far).
 - **Open:** the owner to say which differences matter most.
 
-### V-12. Check the AskUserQuestion picker against a real question
-
-- **Seen on 2026-11-25:** when Claude asked a multiple-choice question, the card showed the tool's
-  JSON payload with the answers inside it, and only "Yes" or "Tell Claude what to do": no way to pick
-  an answer. That was the app installed from `a084f43`, built before V-11 (`1d6b54173e`), which
-  replaces that card with a picker.
-- **Expected:** in a build that includes V-11, a real AskUserQuestion from the `claude` CLI shows
-  the picker: each question, its options with descriptions, single or multiple choice, "Other",
-  keyboard selection, Submit. Claude receives the answers and carries on with them.
-- **To do:** reproduce it with a live `claude` (ask it to "ask me a multiple-choice question with
-  AskUserQuestion"). V-11 was built from the Agent SDK docs and never compared with a live
-  `can_use_tool` request (its commit says so). Check the request and the answer in `claude-code.log`
-  (V-9). Fix any mismatch and add the live request as a test fixture.
-- **Code:** `crates/claude_code_ui/src/view.rs` (the picker in `render_permission`),
-  `session.rs` `respond_permission`, `protocol.rs` `PermissionDecision`.
-
 ### V-13. Compare every small feature of the panel with VS Code's Claude Code extension
 
 - **Today:** parity is tracked in `docs/src/vs-core/claude-parity.md`, built from the extension's
@@ -56,31 +40,71 @@ so far ("Open" lists what the owner may still change before a session starts it)
   was understood, in our own words, and implement it ourselves in Rust from that description. No code,
   icons or other assets are copied or translated line by line. Vireo's panel stays our own
   implementation (README: "No code or assets come from the official extension").
+- **Done on 2026-11-25 (manifest pass):** every command, setting, keybinding and menu entry of the
+  extension's `package.json` (2.1.331) checked against `claude-parity.md`. All were already there
+  except what 2.1.331 added: four settings and three commands, now rows of `claude-parity.md` and
+  items V-16 to V-21.
+- **Left:** the views, cards, menus and buttons of the running extension and its webview code, each
+  compared with Vireo's; screenshots of both (screen capture is not allowed on this machine).
 
-### V-14. A project opens with a normal Claude tab, not the side panel
+### V-16. Setting: Escape stops Claude (`escapeStopsClaude`)
 
-- **Seen on 2026-11-25:** V-4 (`a4a8f41e6c`) shows the Claude panel in the right side bar every
-  time a project opens, even if it was closed last time. The owner: "that is not what I asked, I want
-  a normal Claude Code tab pre-opened, that is all. Now I have a part of the screen locked on a
-  Claude session I cannot close."
-- **Expected:** opening a project folder opens one ordinary Claude tab in the editor area, like any
-  other tab: it can be closed, moved and split. It resumes the project's newest conversation, or
-  starts a new one, with the message box focused. The side bar is left alone.
-- **Code:** `claude_code_ui.rs` `open_on_project_open_from`, called from `zed.rs`
-  `initialize_panels`; `panel.rs` `open` with `Location::PrimaryEditor`.
-- **Decided:** keep the setting `claude_code.open_on_project_open` (true by default). No tab is
-  added when the window already has a Claude tab. The windows whose saved layout still has the
-  Claude panel open in the right side bar (from V-4) get it closed once, the first time the new
-  behaviour runs, so nobody stays stuck with it; after that, the side bar is never touched.
+- **Extension (2.1.331):** `claudeCode.escapeStopsClaude`, true by default. Escape in the Claude
+  panel stops Claude while it works; when off, only the Stop button does. Escape still closes menus
+  and dialogs and declines permission requests and questions.
+- **Vireo today:** Escape always runs `claude_code::Interrupt` (keymaps, contexts `ClaudeCode` and
+  `ClaudeCodeInput > Editor`).
+- **Expected:** `claude_code.escape_stops_claude`, true by default; when false, Escape does not
+  interrupt, and keeps its other uses.
 
-### V-15. Tab still does not accept the suggested prompt
+### V-17. Setting: pin your message while reading the reply (`pinPrompt`)
 
-- **Seen on 2026-11-25:** in the app built from `a9b2ba6c1d`, which includes V-1 (`5fa2a27fd9`),
-  Tab on Claude's grey suggested prompt still does not fill the message box. V-1's test passes, so
-  the test does not reproduce what happens in the app.
-- **Expected:** Tab fills the message box with the suggestion, as V-1 describes.
-- **To do:** find what differs between the test and the app (the side panel instead of a tab, the
-  VS Code base keymap, the real `prompt_suggestion` message, where the focus is) and test that.
+- **Extension (2.1.331):** `claudeCode.pinPrompt`, true by default. Your message stays pinned at the
+  top of the conversation while you scroll through Claude's reply to it; when off, it scrolls away.
+- **Vireo today:** the message scrolls away with the conversation (`view.rs`, the message list).
+- **Expected:** `claude_code.pin_prompt`, true by default: while a reply is on screen, the user
+  message it answers sticks to the top of the list.
+
+### V-18. The context usage indicator below the message box (`contextUsageThreshold`)
+
+- **Extension (2.1.331):** `claudeCode.contextUsageThreshold`, a number from 0 to 100, 50 by
+  default. The context usage indicator shows below the message box once more than this percentage
+  of the context window is used; 0 shows it from the first reply.
+- **Vireo today:** context tokens and cost appear only in a tooltip.
+- **Expected:** an indicator below the message box (the share of the context window used), shown
+  above the threshold, and the setting `claude_code.context_usage_threshold`. Look at the
+  extension's indicator (what it shows, what clicking it does) before building it.
+
+### V-19. "Fix with Claude Code" on failed tests (`fixTestFailure`, `showFixActions`)
+
+- **Extension (2.1.331):** the command `claude-vscode.fixTestFailure` ("Fix with Claude Code") on a
+  failed test's message, in the Testing view's context menu and inline on the message, shown while
+  `claudeCode.showFixActions` (true by default) is on.
+- **Vireo today:** nothing. Vireo shows test results through tasks, not a Testing view, so the place
+  for the action has to be chosen.
+- **Open:** where it goes (a failed task's output, diagnostics' code actions); the setting's text,
+  "where the editor reports something to fix", may also cover diagnostics.
+
+### V-20. Resolve merge conflicts with Claude (`resolveMergeConflicts`)
+
+- **Extension (2.1.331):** `claude-vscode.resolveMergeConflicts` ("Claude Code: Resolve Merge
+  Conflicts"), an editor title button on a file with conflicts, and in the menu of Git's "Merge
+  Changes" group.
+- **Vireo today:** nothing.
+- **Expected:** the action in Vireo's conflict UI (the editor's conflict toolbar, the git panel's
+  conflicted files), opening Claude with a prompt to resolve that file's conflicts. Look at what
+  prompt the extension sends and where the conversation opens.
+
+### V-21. Add a notebook cell to the chat (`addCellToChat`)
+
+- **Extension (2.1.331):** `claude-vscode.addCellToChat` ("Claude Code: Add Cell to Chat") in the
+  notebook cell title menu.
+- **Vireo today:** nothing for cells; Add to Chat works on files and selections.
+- **Expected:** the same entry on a cell in Vireo's notebook view, adding the cell to the message
+  box.
+
+
+## Done
 
 - V-1, Tab accepts the suggested prompt (the message box's key contexts were never matched, which
   also disabled the "/" list's keys and `use_ctrl_enter_to_send`): `5fa2a27fd9`.
@@ -99,5 +123,12 @@ so far ("Open" lists what the owner may still change before a session starts it)
 - V-10, your messages and tool blocks can be selected and copied: `2339863f61`. Left: the diff lines
   of Edit and Write calls cannot be selected.
 - V-11, AskUserQuestion shows its questions and options: `1d6b54173e`.
+- V-12, the AskUserQuestion picker checked against a live request from `claude` 2.1.329: the CLI
+  accepts V-11's answers, and the live request is a test fixture: `3ee28b3458`. Left: seeing the
+  picker drawn in the app.
+- V-14, a project opens with a normal Claude tab, not the side panel (the side bar left open by V-4
+  is closed once per folder): `e4875fee3d`.
+- V-15, Tab on the suggestion: not a bug (the owner found it works). A test now runs it the way the
+  app does, and with suggestions off Tab no longer pastes the hidden one: `b8e7c6377b`.
 - `@` opens a file and folder list in the message box: `ac2410e811`.
 - The extension uninstall test, and the race it revealed in the extension store: `ff07243366`.
