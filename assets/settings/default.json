@@ -2145,6 +2145,8 @@
     // Escape stops Claude while it works; when off, only the Stop button does.
     // Escape still closes menus and declines permission requests and questions.
     "escape_stops_claude": true,
+    // Keep your message pinned at the top while you scroll through the reply.
+    "pin_prompt": true,
   },
   // Settings specific to journaling
   "journal": {

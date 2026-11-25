@@ -136,6 +136,11 @@ pub struct ClaudeCodeSettingsContent {
     ///
     /// Default: true
     pub escape_stops_claude: Option<bool>,
+    /// Keep your message pinned at the top of the conversation while you
+    /// scroll through Claude's reply to it. When off, it scrolls away.
+    ///
+    /// Default: true
+    pub pin_prompt: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]

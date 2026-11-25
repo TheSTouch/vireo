@@ -120,6 +120,11 @@ pub struct ClaudeCodeView {
     full_output: HashSet<usize>,
     /// Timeline rows followed by another, which a rail joins to the next dot.
     rails: HashSet<usize>,
+    /// The entry each child of the message list shows, `None` for a date
+    /// line, as of the last render: the scroll handle knows children only.
+    element_entries: Vec<Option<usize>>,
+    /// The user message drawn pinned at the top of the list.
+    pinned_prompt: Option<usize>,
     pub focus_view: bool,
     attachments: Vec<Attachment>,
     editor_context: Option<EditorContext>,
@@ -441,6 +446,8 @@ impl ClaudeCodeView {
             collapsed: HashSet::new(),
             full_output: HashSet::new(),
             rails: HashSet::new(),
+            element_entries: Vec::new(),
+            pinned_prompt: None,
             focus_view: settings.focus_view,
             attachments: Vec::new(),
             editor_context: None,
@@ -1496,6 +1503,7 @@ impl ClaudeCodeView {
         let settings = ClaudeCodeSettings::get_global(cx).clone();
         let entries = self.session.read(cx).conversation.entries.clone();
         let mut elements = Vec::with_capacity(entries.len());
+        self.element_entries.clear();
         let mut previous_day = None;
         let focus_view = self.focus_view;
         let visible = |entry: &Entry| {
@@ -1539,6 +1547,7 @@ impl ClaudeCodeView {
                         .child(Divider::horizontal())
                         .into_any_element(),
                 );
+                self.element_entries.push(None);
             }
             previous_day = Some(day);
             let timestamp = settings
@@ -1582,8 +1591,87 @@ impl ClaudeCodeView {
                 ),
             };
             elements.push(element);
+            self.element_entries.push(Some(index));
         }
         elements
+    }
+
+    /// The user message that the reply at the top of the list answers, once
+    /// that message has scrolled above the top.
+    fn prompt_to_pin(&self, cx: &App) -> Option<usize> {
+        if !ClaudeCodeSettings::get_global(cx).pin_prompt {
+            return None;
+        }
+        let top = self.scroll_handle.top_item();
+        self.scroll_handle.bounds_for_item(top)?;
+        let entries = &self.session.read(cx).conversation.entries;
+        let is_user = |index: &usize| matches!(entries.get(*index), Some(Entry::User(_)));
+        if self
+            .element_entries
+            .get(top)
+            .copied()
+            .flatten()
+            .is_some_and(|index| is_user(&index))
+        {
+            return None;
+        }
+        self.element_entries
+            .get(..top)?
+            .iter()
+            .rev()
+            .flatten()
+            .find(|index| is_user(index))
+            .copied()
+    }
+
+    /// Returns whether the pinned message changed.
+    fn refresh_pinned_prompt(&mut self, cx: &App) -> bool {
+        let pinned = self.prompt_to_pin(cx);
+        let changed = pinned != self.pinned_prompt;
+        self.pinned_prompt = pinned;
+        changed
+    }
+
+    fn render_pinned_prompt(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let index = self.pinned_prompt?;
+        let Some(Entry::User(user)) = self.session.read(cx).conversation.entries.get(index) else {
+            return None;
+        };
+        let text = strip_context_preamble(&user.text).trim().to_string();
+        let colors = cx.theme().colors();
+        Some(
+            div()
+                .id("pinned-prompt")
+                .debug_selector(|| "pinned-prompt".into())
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .px_3()
+                .py_1p5()
+                .bg(colors.panel_background)
+                .border_b_1()
+                .border_color(colors.border_variant)
+                .cursor_pointer()
+                .hover(|style| style.bg(colors.element_hover))
+                .tooltip(Tooltip::text("Scroll to this message"))
+                .child(Label::new(text).size(LabelSize::Small).line_clamp(3))
+                .on_click(cx.listener(move |this, _, _, cx| this.scroll_to_entry(index, cx)))
+                .into_any_element(),
+        )
+    }
+
+    fn scroll_to_entry(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some(element) = self
+            .element_entries
+            .iter()
+            .position(|entry| *entry == Some(index))
+        else {
+            return;
+        };
+        self.follow_tail = false;
+        self.scroll_handle.scroll_to_top_of_item(element);
+        cx.notify();
     }
 
     fn render_user(
@@ -3253,12 +3341,37 @@ impl Render for ClaudeCodeView {
                                 this.scrolled_by_user = true;
                                 cx.notify();
                             }))
-                            .child(if empty {
-                                self.render_empty_state(cx)
-                            } else {
-                                v_flex().p_2().gap_2().children(entries).into_any_element()
+                            // The entries are the list's own children, so that
+                            // the scroll handle knows where each one is.
+                            .when(empty, |this| this.child(self.render_empty_state(cx)))
+                            .when(!empty, |this| {
+                                this.flex().flex_col().p_2().gap_2().children(entries)
                             }),
                     )
+                    .child({
+                        // Laid out after the list, when its children's places
+                        // and the scroll offset of this frame are known.
+                        let view = cx.entity().downgrade();
+                        gpui::canvas(
+                            move |_, _, cx| {
+                                let changed = view
+                                    .update(cx, |this, cx| this.refresh_pinned_prompt(cx))
+                                    .unwrap_or(false);
+                                // A notification during a draw does not
+                                // schedule another one.
+                                if changed {
+                                    let view = view.clone();
+                                    cx.defer(move |cx| {
+                                        view.update(cx, |_, cx| cx.notify()).log_err();
+                                    });
+                                }
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .size_0()
+                    })
+                    .children(self.render_pinned_prompt(cx))
                     .children(jump_to_bottom),
             )
             .children(self.render_spinner(cx))
@@ -4952,5 +5065,76 @@ mod tests {
                 Some(&serde_json::json!("deny"))
             );
         });
+    }
+
+    fn transcript_with_long_replies() -> Vec<Entry> {
+        let mut conversation = crate::conversation::Conversation::default();
+        for question in ["first question", "second question"] {
+            conversation.push_user_prompt(question.into(), 0, Utc::now());
+            conversation
+                .entries
+                .push(Entry::AssistantText(crate::conversation::TextEntry {
+                    message_id: None,
+                    text: (0..120)
+                        .map(|line| format!("line {line} of the reply to the {question}"))
+                        .collect::<Vec<_>>()
+                        .join("\n\n"),
+                    timestamp: Utc::now(),
+                    streaming: false,
+                    parent_tool_use_id: None,
+                }));
+        }
+        conversation.entries
+    }
+
+    fn scroll_to(view: &Entity<ClaudeCodeView>, offset: f32, cx: &mut gpui::VisualTestContext) {
+        view.update(cx, |view, cx| {
+            view.follow_tail = false;
+            view.scroll_handle
+                .set_offset(gpui::point(px(0.), px(-offset)));
+            cx.notify();
+        });
+        cx.run_until_parked();
+    }
+
+    /// V-17: while a reply is read, the message it answers stays at the top;
+    /// clicking it goes back to the message. Off, nothing is pinned.
+    #[gpui::test]
+    async fn the_prompt_stays_pinned_over_its_reply(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, transcript_with_long_replies()).await;
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.pinned_prompt, Some(2), "the end of the second reply");
+        });
+
+        scroll_to(&view, 0., cx);
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.pinned_prompt, None, "the first message is on screen");
+        });
+
+        scroll_to(&view, 400., cx);
+        view.read_with(cx, |view, _| assert_eq!(view.pinned_prompt, Some(0)));
+        let pinned = cx
+            .debug_bounds("pinned-prompt")
+            .expect("the pinned message is drawn");
+        cx.simulate_click(pinned.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.pinned_prompt, None);
+            assert!(!view.follow_tail);
+        });
+        let (offset, _) = scroll_position(&view, cx);
+        assert!(offset < px(20.), "back at the first message, at {offset:?}");
+
+        cx.update(|_, cx| {
+            cx.update_global::<settings::SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings.claude_code.get_or_insert_default().pin_prompt = Some(false);
+                });
+            });
+        });
+        scroll_to(&view, 400., cx);
+        view.read_with(cx, |view, _| assert_eq!(view.pinned_prompt, None));
+        assert!(cx.debug_bounds("pinned-prompt").is_none());
     }
 }
