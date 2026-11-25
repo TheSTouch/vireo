@@ -21,6 +21,42 @@ so far ("Open" lists what the owner may still change before a session starts it)
   - look at the "@" list in the app (only tested so far).
 - **Open:** the owner to say which differences matter most.
 
+### V-12. Check the AskUserQuestion picker against a real question
+
+- **Seen on 2026-11-25:** when Claude asked a multiple-choice question, the card showed the tool's
+  JSON payload with the answers inside it, and only "Yes" or "Tell Claude what to do": no way to pick
+  an answer. That was the app installed from `a084f43`, built before V-11 (`1d6b54173e`), which
+  replaces that card with a picker.
+- **Expected:** in a build that includes V-11, a real AskUserQuestion from the `claude` CLI shows
+  the picker: each question, its options with descriptions, single or multiple choice, "Other",
+  keyboard selection, Submit. Claude receives the answers and carries on with them.
+- **To do:** reproduce it with a live `claude` (ask it to "ask me a multiple-choice question with
+  AskUserQuestion"). V-11 was built from the Agent SDK docs and never compared with a live
+  `can_use_tool` request (its commit says so). Check the request and the answer in `claude-code.log`
+  (V-9). Fix any mismatch and add the live request as a test fixture.
+- **Code:** `crates/claude_code_ui/src/view.rs` (the picker in `render_permission`),
+  `session.rs` `respond_permission`, `protocol.rs` `PermissionDecision`.
+
+### V-13. Compare every small feature of the panel with VS Code's Claude Code extension
+
+- **Today:** parity is tracked in `docs/src/vs-core/claude-parity.md`, built from the extension's
+  documentation and from looking at it, item by item. The owner keeps finding small features that
+  Vireo lacks or does differently.
+- **Expected:** a full, feature-by-feature comparison, to use as the base for recreating the missing
+  ones. Use the extension installed in VS Code (`/Applications/Visual Studio Code.app`). Go through
+  every view, card, menu, button, keybinding and setting. For each one, write down what the extension
+  does, what Vireo does, and the gap. Take screenshots of both where screen capture is allowed. The
+  result updates `claude-parity.md`, and each gap becomes its own backlog item, grouped into batches.
+- **Sources:** the running extension; its manifest (`package.json`: commands, settings, keybindings,
+  views); its documentation at code.claude.com; its stylesheet, for sizes and colours, as V-3 did;
+  and its bundled code, read in depth to understand what it does and how (the messages it sends and
+  receives, its states, its edge cases).
+- **Decided (owner, 2026-11-25):** "we check, we find, we understand, we implement. we dont steal,
+  we don't copy." Study the extension as deeply as needed, including its code. Then write down what
+  was understood, in our own words, and implement it ourselves in Rust from that description. No code,
+  icons or other assets are copied or translated line by line. Vireo's panel stays our own
+  implementation (README: "No code or assets come from the official extension").
+
 ## Done
 
 - V-1, Tab accepts the suggested prompt (the message box's key contexts were never matched, which
