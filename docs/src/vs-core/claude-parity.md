@@ -116,7 +116,7 @@ Vireo's own settings, with no extension counterpart:
 | --- | --- | --- | --- | --- |
 | `new_conversation_opens_in` | `"new_tab"` or `"current"`, `"new_tab"` | Where the new conversation button (+) opens a conversation: a new Claude tab, keeping the current one open, or in place of the current one. An empty conversation is only focused. | Panel B-V2 | Done |
 | `past_conversation_opens_in` | `"new_tab"` or `"current"`, `"new_tab"` | Where a conversation picked from past conversations opens. One already open is brought forward. | Panel B-V2 | Done |
-| `open_on_project_open` | bool, `true` | When a project folder opens, show Claude in the right side bar with the project's newest conversation resumed (or a new one), the message box focused. | Panel B-V4 | Done |
+| `open_on_project_open` | bool, `true` | When a project folder opens, open a Claude tab in the editor area with the project's newest conversation resumed (or a new one), the message box focused. No tab is added when the window already has one. | Panel B-V4, V-14 | Done |
 
 ## Menus and places
 

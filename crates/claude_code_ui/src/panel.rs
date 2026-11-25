@@ -142,6 +142,16 @@ impl ClaudeCodePanel {
         }
     }
 
+    #[cfg(test)]
+    pub fn load_for_test(
+        workspace: Entity<Workspace>,
+        project: Entity<Project>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self::new(workspace, project, window, cx)
+    }
+
     fn subscribe_view(view: &Entity<ClaudeCodeView>, cx: &mut Context<Self>) -> Subscription {
         cx.subscribe(view, |this, _, _: &ViewEvent, cx| {
             this.save_state(cx);
@@ -187,8 +197,7 @@ impl ClaudeCodePanel {
             window.focus(&self.view.read(cx).input_focus_handle(cx), cx);
             return;
         }
-        if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in
-            == ClaudeCodeOpensIn::NewTab
+        if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in == ClaudeCodeOpensIn::NewTab
         {
             open_in_new_tab_later(self.workspace.clone(), None, window, cx);
             return;
@@ -201,47 +210,22 @@ impl ClaudeCodePanel {
         self.replace_conversation(&workspace, project, None, window, cx);
     }
 
-    /// Resumes the newest conversation of the project from `transcripts_dir`,
-    /// unless the panel already shows one, such as the session it had before
-    /// Vireo restarted.
-    pub fn resume_newest_conversation(
+    /// Gives up the panel's conversation to a tab that resumes it, keeping a
+    /// new conversation, and forgets it as the panel's session to restore.
+    pub fn release_conversation(
         &mut self,
-        transcripts_dir: PathBuf,
+        workspace: &Entity<Workspace>,
+        project: Entity<Project>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !self.shows_new_conversation(cx) {
-            return;
-        }
-        let store = crate::sessions::read_store(cx);
-        let newest = cx.background_spawn(async move {
-            crate::sessions::newest_session(&transcripts_dir, &store)
+        let view = new_view(workspace, project, None, window, cx);
+        self.set_view(view, cx);
+        self.saved_state = None;
+        let cwd_key = self.cwd_key.clone();
+        crate::sessions::update_store(cx, |store| {
+            store.open.remove(&cwd_key);
         });
-        cx.spawn_in(window, async move |this, cx| {
-            let Some(session_id) = newest.await else {
-                return;
-            };
-            this.update_in(cx, |this, window, cx| {
-                // The person may have started typing a new one meanwhile.
-                if !this.shows_new_conversation(cx) {
-                    return;
-                }
-                let Some(workspace) = this.workspace.upgrade() else {
-                    return;
-                };
-                let Some(project) = this.view.read(cx).session.read(cx).project() else {
-                    return;
-                };
-                this.replace_conversation(&workspace, project, Some(session_id), window, cx);
-            })
-            .log_err();
-        })
-        .detach();
-    }
-
-    fn shows_new_conversation(&self, cx: &App) -> bool {
-        let session = self.view.read(cx).session.read(cx);
-        session.session_id().is_none() && session.conversation.entries.is_empty()
     }
 
     /// Shows a new conversation, or the past session `resume`, in place of the
@@ -405,8 +389,7 @@ impl ClaudeCodeTab {
             window.focus(&self.view.read(cx).input_focus_handle(cx), cx);
             return;
         }
-        if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in
-            == ClaudeCodeOpensIn::NewTab
+        if ClaudeCodeSettings::get_global(cx).new_conversation_opens_in == ClaudeCodeOpensIn::NewTab
         {
             open_in_new_tab_later(self.workspace.clone(), None, window, cx);
             return;
@@ -812,7 +795,10 @@ mod tests {
         });
     }
 
-    fn tabs(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<Entity<ClaudeCodeTab>> {
+    fn tabs(
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> Vec<Entity<ClaudeCodeTab>> {
         workspace.read_with(cx, |workspace, cx| {
             workspace.items_of_type::<ClaudeCodeTab>(cx).collect()
         })
@@ -863,7 +849,11 @@ mod tests {
 
         tab.update_in(cx, |tab, window, cx| tab.new_conversation(window, cx));
         cx.run_until_parked();
-        assert_eq!(tabs(&workspace, cx).len(), 1, "an empty tab is only focused");
+        assert_eq!(
+            tabs(&workspace, cx).len(),
+            1,
+            "an empty tab is only focused"
+        );
 
         cx.update(|_, cx| start_conversation(&view, "s1", cx));
         tab.update_in(cx, |tab, window, cx| tab.new_conversation(window, cx));
@@ -973,9 +963,31 @@ mod tests {
         cx.update(|window, cx| view.read(cx).input_focus_handle(cx).is_focused(window))
     }
 
+    fn only_tab_view(
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> Entity<ClaudeCodeView> {
+        let opened = tabs(workspace, cx);
+        assert_eq!(opened.len(), 1, "one Claude tab");
+        opened[0].read_with(cx, |tab, _| tab.view.clone())
+    }
+
+    fn set_open_on_project_open(enabled: bool, cx: &mut VisualTestContext) {
+        cx.update(|_, cx| {
+            cx.update_global::<SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings
+                        .claude_code
+                        .get_or_insert_default()
+                        .open_on_project_open = Some(enabled);
+                });
+            });
+        });
+    }
+
     #[gpui::test]
-    async fn a_project_opens_with_its_newest_conversation(cx: &mut TestAppContext) {
-        let (workspace, panel, cx) = workspace_with_panel(cx).await;
+    async fn a_project_opens_a_tab_with_its_newest_conversation(cx: &mut TestAppContext) {
+        let (workspace, _panel, cx) = workspace_with_panel(cx).await;
         let transcripts = tempfile::tempdir().unwrap();
         write_transcript(transcripts.path(), "old", 3600);
         write_transcript(transcripts.path(), "newest", 60);
@@ -983,58 +995,90 @@ mod tests {
         cx.update(|_, cx| {
             crate::sessions::update_store(cx, |store| store.meta_mut("archived").archived = true)
         });
-        assert!(!right_dock_shows_panel(&workspace, cx));
 
         open_project(&workspace, &transcripts, cx);
-        assert!(right_dock_shows_panel(&workspace, cx));
-        let view = panel.read_with(cx, |panel, _| panel.view.clone());
+        let view = only_tab_view(&workspace, cx);
         assert_eq!(session_id(&view, cx).as_deref(), Some("newest"));
         assert!(input_is_focused(&view, cx));
+        assert!(!right_dock_shows_panel(&workspace, cx));
+
+        // The tab is an ordinary tab: once closed, nothing brings it back
+        // until the next project open, which adds only one.
+        open_project(&workspace, &transcripts, cx);
+        assert_eq!(tabs(&workspace, cx).len(), 1);
+        workspace.update_in(cx, |workspace, window, cx| {
+            let pane = workspace.active_pane().clone();
+            pane.update(cx, |pane, cx| {
+                pane.close_active_item(&Default::default(), window, cx)
+                    .detach_and_log_err(cx)
+            });
+        });
+        cx.run_until_parked();
+        assert!(tabs(&workspace, cx).is_empty());
     }
 
     #[gpui::test]
     async fn a_project_without_conversations_opens_a_new_one(cx: &mut TestAppContext) {
-        let (workspace, panel, cx) = workspace_with_panel(cx).await;
+        let (workspace, _panel, cx) = workspace_with_panel(cx).await;
         let transcripts = tempfile::tempdir().unwrap();
-        let empty_view = panel.read_with(cx, |panel, _| panel.view.clone());
 
         open_project(&workspace, &transcripts, cx);
-        assert!(right_dock_shows_panel(&workspace, cx));
-        let view = panel.read_with(cx, |panel, _| panel.view.clone());
-        assert_eq!(view, empty_view);
+        let view = only_tab_view(&workspace, cx);
         assert_eq!(session_id(&view, cx), None);
         assert!(input_is_focused(&view, cx));
     }
 
     #[gpui::test]
-    async fn the_restored_session_and_the_setting_win(cx: &mut TestAppContext) {
-        let (workspace, panel, cx) = workspace_with_panel(cx).await;
+    async fn the_setting_turns_the_tab_off(cx: &mut TestAppContext) {
+        let (workspace, _panel, cx) = workspace_with_panel(cx).await;
         let transcripts = tempfile::tempdir().unwrap();
         write_transcript(transcripts.path(), "newest", 0);
 
-        cx.update(|_, cx| {
-            cx.update_global::<SettingsStore, ()>(|store, cx| {
-                store.update_user_settings(cx, |settings| {
-                    settings.claude_code.get_or_insert_default().open_on_project_open = Some(false);
-                });
+        set_open_on_project_open(false, cx);
+        open_project(&workspace, &transcripts, cx);
+        assert!(tabs(&workspace, cx).is_empty());
+        assert!(!right_dock_shows_panel(&workspace, cx));
+    }
+
+    #[gpui::test]
+    async fn the_side_bar_left_open_by_v4_is_closed_once(cx: &mut TestAppContext) {
+        let (workspace, _panel, cx) = workspace_with_panel(cx).await;
+        let transcripts = tempfile::tempdir().unwrap();
+        let show_panel = |cx: &mut VisualTestContext| {
+            workspace.update_in(cx, |workspace, window, cx| {
+                open(workspace, Location::Panel, None, window, cx);
             });
-        });
+            cx.run_until_parked();
+        };
+
+        show_panel(cx);
+        assert!(right_dock_shows_panel(&workspace, cx));
         open_project(&workspace, &transcripts, cx);
         assert!(!right_dock_shows_panel(&workspace, cx));
 
-        cx.update(|_, cx| {
-            cx.update_global::<SettingsStore, ()>(|store, cx| {
-                store.update_user_settings(cx, |settings| {
-                    settings.claude_code.get_or_insert_default().open_on_project_open = Some(true);
-                });
-            });
-        });
-        // The session the panel had before a restart stays.
-        let restored = panel.read_with(cx, |panel, _| panel.view.clone());
-        cx.update(|_, cx| start_conversation(&restored, "restored", cx));
+        // Opened again by the person, it stays.
+        show_panel(cx);
         open_project(&workspace, &transcripts, cx);
         assert!(right_dock_shows_panel(&workspace, cx));
-        panel.read_with(cx, |panel, _| assert_eq!(panel.view, restored));
-        assert_eq!(session_id(&restored, cx).as_deref(), Some("restored"));
+    }
+
+    #[gpui::test]
+    async fn the_tab_takes_over_the_panels_conversation(cx: &mut TestAppContext) {
+        let (workspace, panel, cx) = workspace_with_panel(cx).await;
+        let transcripts = tempfile::tempdir().unwrap();
+        write_transcript(transcripts.path(), "newest", 0);
+        let restored = panel.read_with(cx, |panel, _| panel.view.clone());
+        cx.update(|_, cx| start_conversation(&restored, "newest", cx));
+        panel.update(cx, |panel, cx| panel.save_state(cx));
+
+        open_project(&workspace, &transcripts, cx);
+        let view = only_tab_view(&workspace, cx);
+        assert_eq!(session_id(&view, cx).as_deref(), Some("newest"));
+        let panel_view = panel.read_with(cx, |panel, _| panel.view.clone());
+        assert_ne!(panel_view, restored);
+        assert_eq!(session_id(&panel_view, cx), None);
+        cx.update(|_, cx| {
+            assert!(crate::sessions::read_store(cx).open.is_empty());
+        });
     }
 }

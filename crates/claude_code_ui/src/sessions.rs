@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -109,6 +109,10 @@ pub struct SessionStore {
     /// whether each was in the middle of a turn.
     #[serde(default)]
     pub open: BTreeMap<String, Vec<OpenSession>>,
+    /// The workspace folders whose side bar was closed once when the Claude
+    /// tab replaced the side bar panel on project open.
+    #[serde(default)]
+    pub side_bar_closed_for_tab: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

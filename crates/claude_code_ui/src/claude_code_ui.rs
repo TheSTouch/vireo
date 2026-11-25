@@ -14,7 +14,9 @@ pub mod view;
 
 use ::settings::Settings as _;
 use gpui::{App, AppContext as _, Context, Entity, Focusable as _, Window, actions};
+use util::ResultExt as _;
 use workspace::Workspace;
+use workspace::dock::Panel as _;
 
 pub use crate::panel::{ClaudeCodePanel, ClaudeCodeTab};
 use crate::panel::{Location, active_view, open, open_in_new_window, open_preferred};
@@ -223,10 +225,10 @@ fn focus_input(
     open_preferred(workspace, window, cx);
 }
 
-/// `open_on_project_open`: when a window opens on a project folder, shows the
-/// Claude panel with the project's newest conversation, or a new one, and
-/// focuses its message box. Called once the window's docks are restored, so
-/// that their saved state does not close the panel again.
+/// `open_on_project_open`: when a window opens on a project folder, opens a
+/// Claude tab in the editor area with the project's newest conversation, or a
+/// new one, and focuses its message box. Called once the window's docks are
+/// restored, because it may close the side bar that V-4 used to open.
 pub fn open_on_project_open(
     workspace: &mut Workspace,
     window: &mut Window,
@@ -253,14 +255,72 @@ fn open_on_project_open_from(
     if !has_folder {
         return;
     }
-    let Some(panel) = workspace.focus_panel::<ClaudeCodePanel>(window, cx) else {
+    close_side_bar_once(workspace, window, cx);
+    let store = sessions::read_store(cx);
+    let newest =
+        cx.background_spawn(async move { sessions::newest_session(&transcripts_dir, &store) });
+    cx.spawn_in(window, async move |workspace, cx| {
+        let resume = newest.await;
+        workspace
+            .update_in(cx, |workspace, window, cx| {
+                if workspace
+                    .items_of_type::<ClaudeCodeTab>(cx)
+                    .next()
+                    .is_some()
+                {
+                    return;
+                }
+                if let Some(session_id) = &resume
+                    && let Some(panel) = workspace.panel::<ClaudeCodePanel>(cx)
+                    && panel.read(cx).view.read(cx).session.read(cx).session_id()
+                        == Some(session_id.as_str())
+                {
+                    // Two views on one session would each run their own
+                    // `claude` on it, so the tab takes it over.
+                    let workspace_entity = cx.entity();
+                    let project = workspace.project().clone();
+                    panel.update(cx, |panel, cx| {
+                        panel.release_conversation(&workspace_entity, project, window, cx)
+                    });
+                }
+                open(workspace, Location::PrimaryEditor, resume, window, cx);
+            })
+            .log_err();
+    })
+    .detach();
+}
+
+/// V-4 opened the Claude panel in the side bar on every project open, and the
+/// window layout saved it that way. The first time a folder opens with the tab
+/// instead, that side bar is closed; after that it is left as the person sets it.
+fn close_side_bar_once(
+    workspace: &mut Workspace,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) {
+    let cwd_key = panel::workspace_cwd(workspace.project(), cx)
+        .to_string_lossy()
+        .into_owned();
+    if sessions::read_store(cx)
+        .side_bar_closed_for_tab
+        .contains(&cwd_key)
+    {
         return;
-    };
-    let view = panel.read(cx).view.clone();
-    window.focus(&view.read(cx).input_focus_handle(cx), cx);
-    panel.update(cx, |panel, cx| {
-        panel.resume_newest_conversation(transcripts_dir, window, cx)
+    }
+    sessions::update_store(cx, |store| {
+        store.side_bar_closed_for_tab.insert(cwd_key);
     });
+    for dock in workspace.all_docks() {
+        dock.update(cx, |dock, cx| {
+            let shows_claude = dock.is_open()
+                && dock
+                    .visible_panel()
+                    .is_some_and(|panel| panel.panel_key() == ClaudeCodePanel::panel_key());
+            if shows_claude {
+                dock.set_open(false, window, cx);
+            }
+        });
+    }
 }
 
 /// Opens a new conversation in an editor tab with `prompt` in its message
