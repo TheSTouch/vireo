@@ -831,23 +831,30 @@ impl ClaudeCodeView {
         cx.notify();
     }
 
+    /// The suggested prompt the empty message box shows in grey, if any.
+    fn shown_suggestion(&self, cx: &App) -> Option<String> {
+        if !ClaudeCodeSettings::get_global(cx).prompt_suggestions
+            || !self.input.read(cx).text(cx).is_empty()
+        {
+            return None;
+        }
+        self.session.read(cx).conversation.prompt_suggestion.clone()
+    }
+
     fn accept_suggestion(
         &mut self,
         _: &AcceptSuggestion,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let suggestion = self.session.read(cx).conversation.prompt_suggestion.clone();
-        let input_empty = self.input.read(cx).text(cx).is_empty();
-        match suggestion {
-            Some(suggestion) if input_empty => {
-                self.input.update(cx, |input, cx| {
-                    input.set_text(suggestion, window, cx);
-                    input.move_to_end(&editor::actions::MoveToEnd, window, cx);
-                });
-            }
-            _ => cx.propagate(),
-        }
+        let Some(suggestion) = self.shown_suggestion(cx) else {
+            cx.propagate();
+            return;
+        };
+        self.input.update(cx, |input, cx| {
+            input.set_text(suggestion, window, cx);
+            input.move_to_end(&editor::actions::MoveToEnd, window, cx);
+        });
     }
 
     fn interrupt(&mut self, _: &Interrupt, _: &mut Window, cx: &mut Context<Self>) {
@@ -2306,14 +2313,7 @@ impl ClaudeCodeView {
         if settings.use_ctrl_enter_to_send {
             key_context.add("use_ctrl_enter_to_send");
         }
-        if self
-            .session
-            .read(cx)
-            .conversation
-            .prompt_suggestion
-            .is_some()
-            && self.input.read(cx).text(cx).is_empty()
-        {
+        if self.shown_suggestion(cx).is_some() {
             key_context.add("has_suggestion");
         }
         if !self.visible_commands(cx).is_empty() {
@@ -4462,5 +4462,140 @@ mod tests {
         cx.run_until_parked();
         cx.simulate_keystrokes("down");
         view.read_with(cx, |view, _| assert_eq!(view.command_selection, 1));
+    }
+
+    /// V-15: the app's path to the suggestion, unlike the test above: the panel
+    /// in the side bar, the VS Code base keymap on top of the default one, a
+    /// prompt typed and sent, and the CLI's own lines for the reply, the result
+    /// and the suggestion.
+    #[gpui::test]
+    async fn tab_accepts_a_suggestion_from_the_cli_in_the_side_bar(cx: &mut gpui::TestAppContext) {
+        let app_state = cx.update(|cx| {
+            let state = workspace::AppState::test(cx);
+            theme_settings::init(theme::LoadThemes::JustBase, cx);
+            editor::init(cx);
+            ClaudeCodeSettings::register(cx);
+            for path in [
+                settings::DEFAULT_KEYMAP_PATH,
+                "keymaps/macos/vscode.json",
+                "keymaps/specific-overrides-macos.json",
+            ] {
+                let bindings = settings::KeymapFile::load_asset_allow_partial_failure(path, cx)
+                    .unwrap_or_default();
+                cx.bind_keys(bindings);
+            }
+            state
+        });
+        let project = project::Project::test(app_state.fs.clone(), [], cx).await;
+        let (multi_workspace, cx) = cx
+            .add_window_view(|window, cx| workspace::MultiWorkspace::test_new(project, window, cx));
+        let workspace =
+            multi_workspace.read_with(cx, |multi_workspace, _| multi_workspace.workspace().clone());
+        let events = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let panel = workspace.update_in(cx, |workspace, window, cx| {
+            let project = workspace.project().clone();
+            let workspace_entity = cx.entity();
+            let panel = cx.new(|cx| {
+                crate::panel::ClaudeCodePanel::load_for_test(workspace_entity, project, window, cx)
+            });
+            workspace.add_panel(panel.clone(), window, cx);
+            panel
+        });
+        let view = panel.read_with(cx, |panel, _| panel.view.clone());
+        view.update(cx, |view, cx| {
+            let events = events.clone();
+            view.session.update(cx, |session, _| {
+                session.set_fake_spawner(std::rc::Rc::new(move |_| {
+                    let (process, events_rx, events_tx, stdin) =
+                        crate::process::ClaudeProcess::fake();
+                    *events.borrow_mut() = Some((events_tx, stdin));
+                    (process, events_rx)
+                }));
+            });
+        });
+        workspace.update_in(cx, |workspace, window, cx| {
+            crate::panel::open(workspace, crate::panel::Location::Panel, None, window, cx);
+        });
+        cx.run_until_parked();
+
+        cx.simulate_input("Say hi in three words.");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        let send = |line: &str, cx: &mut gpui::VisualTestContext| {
+            let message = crate::protocol::CliMessage::parse(line).expect("a protocol line");
+            events
+                .borrow()
+                .as_ref()
+                .expect("the prompt started claude")
+                .0
+                .unbounded_send(crate::process::ProcessEvent::Message(message))
+                .expect("the session reads events");
+            cx.run_until_parked();
+        };
+        send(
+            r#"{"type":"system","subtype":"init","session_id":"d742","model":"claude-haiku-5-5","slash_commands":[]}"#,
+            cx,
+        );
+        send(
+            r#"{"type":"assistant","message":{"model":"claude-haiku-5-5","id":"msg_1","type":"message","role":"assistant","content":[{"type":"text","text":"Hi there, friend!"}],"stop_reason":null},"parent_tool_use_id":null,"session_id":"d742","uuid":"025b"}"#,
+            cx,
+        );
+        send(
+            r#"{"duration_api_ms":2350,"stop_reason":"end_turn","session_id":"d742","total_cost_usd":0.0087,"type":"result","subtype":"success","is_error":false,"result":"Hi there, friend!","num_turns":1}"#,
+            cx,
+        );
+        send(
+            r#"{"type":"prompt_suggestion","suggestion":"run the tests","uuid":"7c1e","session_id":"d742"}"#,
+            cx,
+        );
+        view.read_with(cx, |view, cx| {
+            assert_eq!(
+                view.session
+                    .read(cx)
+                    .conversation
+                    .prompt_suggestion
+                    .as_deref(),
+                Some("run the tests")
+            );
+            assert_eq!(view.input.read(cx).text(cx), "");
+        });
+        cx.update(|window, cx| {
+            assert!(
+                view.read(cx).input.focus_handle(cx).is_focused(window),
+                "the message box keeps the focus through the turn"
+            );
+        });
+
+        cx.simulate_keystrokes("tab");
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "run the tests");
+        });
+    }
+
+    /// With prompt suggestions turned off, the suggestion is not shown, so Tab
+    /// does not paste it.
+    #[gpui::test]
+    async fn tab_ignores_a_suggestion_that_is_not_shown(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        cx.update(|_, cx| {
+            cx.update_global::<settings::SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings
+                        .claude_code
+                        .get_or_insert_default()
+                        .prompt_suggestions = Some(false);
+                });
+            });
+        });
+        let session = view.read_with(cx, |view, _| view.session.clone());
+        session.update(cx, |session, cx| {
+            session.conversation.prompt_suggestion = Some("run the tests".into());
+            cx.emit(SessionEvent::Updated);
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("tab");
+        view.read_with(cx, |view, cx| {
+            assert_ne!(view.input.read(cx).text(cx), "run the tests");
+        });
     }
 }
