@@ -321,6 +321,7 @@ impl VsCodeSettings {
             show_fix_actions: self.read_bool("claudeCode.showFixActions"),
             escape_stops_claude: self.read_bool("claudeCode.escapeStopsClaude"),
             pin_prompt: self.read_bool("claudeCode.pinPrompt"),
+            context_usage_threshold: self.read_f32("claudeCode.contextUsageThreshold"),
         })
     }
 
@@ -1352,7 +1353,8 @@ mod tests {
                 "claudeCode.spinnerVerbs": {"mode": "replace", "verbs": ["Brewing"]},
                 "claudeCode.showFixActions": false,
                 "claudeCode.escapeStopsClaude": false,
-                "claudeCode.pinPrompt": false
+                "claudeCode.pinPrompt": false,
+                "claudeCode.contextUsageThreshold": 80
             }"#,
             VsCodeSettingsSource::VsCode,
         )?;
@@ -1373,6 +1375,7 @@ mod tests {
         assert_eq!(claude.show_fix_actions, Some(false));
         assert_eq!(claude.escape_stops_claude, Some(false));
         assert_eq!(claude.pin_prompt, Some(false));
+        assert_eq!(claude.context_usage_threshold, Some(80.));
         assert_eq!(
             claude.environment_variables,
             Some(vec![ClaudeCodeEnvironmentVariable {

@@ -37,6 +37,8 @@ pub struct ClaudeCodeSettings {
     pub show_fix_actions: bool,
     pub escape_stops_claude: bool,
     pub pin_prompt: bool,
+    /// From 0 to 100.
+    pub context_usage_threshold: f32,
 }
 
 impl Settings for ClaudeCodeSettings {
@@ -94,6 +96,11 @@ impl Settings for ClaudeCodeSettings {
             show_fix_actions: claude.show_fix_actions.unwrap_or(true),
             escape_stops_claude: claude.escape_stops_claude.unwrap_or(true),
             pin_prompt: claude.pin_prompt.unwrap_or(true),
+            context_usage_threshold: claude
+                .context_usage_threshold
+                .filter(|threshold| threshold.is_finite())
+                .unwrap_or(50.)
+                .clamp(0., 100.),
         }
     }
 }
@@ -149,6 +156,7 @@ mod tests {
             assert!(settings.show_fix_actions);
             assert!(settings.escape_stops_claude);
             assert!(settings.pin_prompt);
+            assert_eq!(settings.context_usage_threshold, 50.);
             assert!(settings.enable_reopen_closed_session_shortcut);
             assert!(!settings.enable_new_conversation_shortcut);
             assert!(!settings.use_ctrl_enter_to_send);

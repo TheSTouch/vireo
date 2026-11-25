@@ -18,8 +18,8 @@ use project::Project;
 use serde_json::Value;
 use settings::Settings as _;
 use ui::{
-    CommonAnimationExt as _, ContextMenu, ContextMenuEntry, Divider, HighlightedLabel,
-    IconButtonShape, PopoverMenu, Tooltip, prelude::*,
+    CircularProgress, CommonAnimationExt as _, ContextMenu, ContextMenuEntry, Divider,
+    HighlightedLabel, IconButtonShape, PopoverMenu, Tooltip, prelude::*,
 };
 use util::ResultExt as _;
 use workspace::Workspace;
@@ -2598,6 +2598,7 @@ impl ClaudeCodeView {
                             .gap_0p5()
                             .child(self.render_attach_menu(cx))
                             .child(self.render_command_menu(cx))
+                            .children(self.render_context_usage(cx))
                             .children(self.render_usage(cx))
                             .child(self.render_model_menu(cx)),
                     )
@@ -2926,6 +2927,52 @@ impl ClaudeCodeView {
             .ok();
         }));
         cx.notify();
+    }
+
+    /// The share of the context window used, once it is above the setting's
+    /// threshold and a result has given the window's size.
+    fn context_used_percent(&self, cx: &App) -> Option<f32> {
+        let conversation = &self.session.read(cx).conversation;
+        let window = conversation.context_window.filter(|window| *window > 0)?;
+        let used = conversation.last_usage.as_ref()?.context_tokens();
+        let percent = (used as f64 / window as f64 * 100.).min(100.) as f32;
+        (percent > ClaudeCodeSettings::get_global(cx).context_usage_threshold).then_some(percent)
+    }
+
+    fn render_context_usage(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let percent = self.context_used_percent(cx)?;
+        let tooltip = format!(
+            "{}% of the context window used, {}% left before auto-compact. Click to compact now.",
+            percent.round(),
+            (100. - percent).round()
+        );
+        Some(
+            div()
+                .id("context-usage")
+                .debug_selector(|| "context-usage".into())
+                .p_1()
+                .rounded_sm()
+                .cursor_pointer()
+                .hover(|style| style.bg(cx.theme().colors().element_hover))
+                .child(
+                    CircularProgress::new(percent, 100., px(14.), cx)
+                        .stroke_width(px(2.))
+                        .progress_color(cx.theme().colors().text_accent),
+                )
+                .tooltip(Tooltip::text(tooltip))
+                .on_click(cx.listener(|this, _, _, cx| this.compact(cx)))
+                .into_any_element(),
+        )
+    }
+
+    /// Sends /compact, as choosing it in the "/" list and sending does.
+    fn compact(&mut self, cx: &mut Context<Self>) {
+        let result = self.session.update(cx, |session, cx| {
+            session.send_prompt("/compact".into(), Vec::new(), cx)
+        });
+        if result.is_ok() {
+            self.ensure_spinner(cx);
+        }
     }
 
     fn render_usage(&self, cx: &App) -> Option<AnyElement> {
@@ -5136,5 +5183,93 @@ mod tests {
         scroll_to(&view, 400., cx);
         view.read_with(cx, |view, _| assert_eq!(view.pinned_prompt, None));
         assert!(cx.debug_bounds("pinned-prompt").is_none());
+    }
+
+    fn set_context_usage(
+        view: &Entity<ClaudeCodeView>,
+        used: u64,
+        window: Option<u64>,
+        cx: &mut gpui::VisualTestContext,
+    ) {
+        let session = view.read_with(cx, |view, _| view.session.clone());
+        session.update(cx, |session, cx| {
+            session.conversation.last_usage = Some(crate::protocol::Usage {
+                input_tokens: used,
+                ..Default::default()
+            });
+            session.conversation.context_window = window;
+            cx.emit(SessionEvent::Updated);
+        });
+        cx.run_until_parked();
+    }
+
+    fn set_threshold(threshold: f32, cx: &mut gpui::VisualTestContext) {
+        cx.update(|_, cx| {
+            cx.update_global::<settings::SettingsStore, ()>(|store, cx| {
+                store.update_user_settings(cx, |settings| {
+                    settings
+                        .claude_code
+                        .get_or_insert_default()
+                        .context_usage_threshold = Some(threshold);
+                });
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    /// V-18: the ring shows above the threshold once the window is known, and
+    /// clicking it sends /compact.
+    #[gpui::test]
+    async fn the_context_ring_shows_above_the_threshold(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        set_context_usage(&view, 600_000, None, cx);
+        assert!(
+            cx.debug_bounds("context-usage").is_none(),
+            "hidden until a result gives the window"
+        );
+
+        set_context_usage(&view, 400_000, Some(1_000_000), cx);
+        assert!(cx.debug_bounds("context-usage").is_none(), "40% <= 50%");
+
+        set_context_usage(&view, 600_000, Some(1_000_000), cx);
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.context_used_percent(cx), Some(60.));
+        });
+
+        set_threshold(70., cx);
+        assert!(cx.debug_bounds("context-usage").is_none(), "60% <= 70%");
+        set_threshold(0., cx);
+        set_context_usage(&view, 1_000, Some(1_000_000), cx);
+        let ring = cx
+            .debug_bounds("context-usage")
+            .expect("0 shows it from the first reply");
+
+        let session = view.read_with(cx, |view, _| view.session.clone());
+        let channels = std::rc::Rc::new(std::cell::RefCell::new(None));
+        session.update(cx, |session, _| {
+            let channels = channels.clone();
+            session.set_fake_spawner(std::rc::Rc::new(move |_| {
+                let (process, events_rx, events_tx, stdin) = crate::process::ClaudeProcess::fake();
+                *channels.borrow_mut() = Some((events_tx, stdin));
+                (process, events_rx)
+            }));
+        });
+        cx.simulate_click(ring.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        let sent = channels
+            .borrow_mut()
+            .as_mut()
+            .map(|(_, stdin)| std::iter::from_fn(|| stdin.try_recv().ok()).collect::<Vec<_>>())
+            .unwrap_or_default();
+        assert!(
+            sent.iter().any(|line| line.contains("\"/compact\"")),
+            "sent: {sent:?}"
+        );
+        session.read_with(cx, |session, _| {
+            assert!(matches!(
+                session.conversation.entries.last(),
+                Some(Entry::User(user)) if user.text == "/compact"
+            ));
+        });
     }
 }

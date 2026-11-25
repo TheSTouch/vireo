@@ -202,6 +202,8 @@ pub struct Conversation {
     pub turn: TurnState,
     pub turn_started_at: Option<DateTime<Utc>>,
     pub last_usage: Option<Usage>,
+    /// The context window of the conversation's model, from the last result.
+    pub context_window: Option<u64>,
     pub total_cost_usd: f64,
     pub rate_limit: Option<RateLimitInfo>,
     pub prompt_suggestion: Option<String>,
@@ -685,6 +687,9 @@ impl Conversation {
         if let Some(cost) = result.total_cost_usd {
             self.total_cost_usd += cost;
         }
+        if let Some(window) = context_window(&result, self.model.as_deref()) {
+            self.context_window = Some(window);
+        }
         if result.session_id.is_some() {
             self.session_id = result.session_id.clone();
         }
@@ -705,6 +710,26 @@ impl Conversation {
         }
         self.finish_turn();
     }
+}
+
+/// The context window of `model` in a result's usage by model. A result can
+/// also count a smaller model that ran side tasks, so without a match the
+/// largest window is taken.
+fn context_window(result: &ResultMessage, model: Option<&str>) -> Option<u64> {
+    let windows = || {
+        result
+            .model_usage
+            .iter()
+            .filter_map(|(name, usage)| Some((name, usage.context_window.filter(|w| *w > 0)?)))
+    };
+    model
+        .and_then(|model| {
+            windows()
+                .find(|(name, _)| name.as_str() == model)
+                .or_else(|| windows().find(|(name, _)| name.starts_with(model)))
+        })
+        .map(|(_, window)| window)
+        .or_else(|| windows().map(|(_, window)| window).max())
 }
 
 /// The CLI's "not signed in" errors, such as "Invalid API key · Please run
@@ -742,6 +767,35 @@ mod tests {
         for line in lines {
             conversation.apply(CliMessage::parse(line).unwrap(), Utc::now());
         }
+    }
+
+    #[test]
+    fn a_result_gives_the_context_window_of_the_model() {
+        let mut conversation = Conversation::default();
+        assert_eq!(conversation.context_window, None);
+        apply_all(
+            &mut conversation,
+            &[
+                r#"{"type":"assistant","message":{"model":"claude-opus-5-5","id":"m1","role":"assistant","content":[{"type":"text","text":"hi"}],"usage":{"input_tokens":10,"cache_read_input_tokens":20000,"output_tokens":5}},"parent_tool_use_id":null,"session_id":"s"}"#,
+                r#"{"type":"result","subtype":"success","is_error":false,"session_id":"s","modelUsage":{"claude-haiku-5-5":{"inputTokens":3346,"contextWindow":200000},"claude-opus-5-5":{"inputTokens":2814,"contextWindow":1000000}}}"#,
+            ],
+        );
+        assert_eq!(conversation.context_window, Some(1_000_000));
+
+        // An unknown model: the largest window. No windows: unchanged.
+        conversation.model = Some("another".into());
+        apply_all(
+            &mut conversation,
+            &[
+                r#"{"type":"result","subtype":"success","is_error":false,"modelUsage":{"a":{"contextWindow":200000},"b":{"contextWindow":400000}}}"#,
+            ],
+        );
+        assert_eq!(conversation.context_window, Some(400_000));
+        apply_all(
+            &mut conversation,
+            &[r#"{"type":"result","subtype":"success","is_error":false}"#],
+        );
+        assert_eq!(conversation.context_window, Some(400_000));
     }
 
     #[test]

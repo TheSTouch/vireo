@@ -2147,6 +2147,10 @@
     "escape_stops_claude": true,
     // Keep your message pinned at the top while you scroll through the reply.
     "pin_prompt": true,
+    // Show the context usage indicator below the message box once more than
+    // this percentage of the context window is used (0 to 100; 0: from the
+    // first reply).
+    "context_usage_threshold": 50,
   },
   // Settings specific to journaling
   "journal": {

@@ -306,6 +306,16 @@ pub struct ResultMessage {
     pub result: Option<String>,
     #[serde(default)]
     pub errors: Vec<String>,
+    /// Usage by model, which also gives each model's context window.
+    #[serde(default, rename = "modelUsage")]
+    pub model_usage: std::collections::BTreeMap<String, ModelUsage>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelUsage {
+    #[serde(default)]
+    pub context_window: Option<u64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]

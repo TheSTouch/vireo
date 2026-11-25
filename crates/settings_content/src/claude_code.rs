@@ -141,6 +141,12 @@ pub struct ClaudeCodeSettingsContent {
     ///
     /// Default: true
     pub pin_prompt: Option<bool>,
+    /// Show the context usage indicator below the message box once more than
+    /// this percentage of the context window is used, from 0 to 100. 0 shows
+    /// it from the first reply.
+    ///
+    /// Default: 50
+    pub context_usage_threshold: Option<f32>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]
