@@ -25,6 +25,11 @@ Vireo's builds use a lot of memory. The app keeps the dev release channel, so it
 updates from Zed's servers, and it is signed locally: the first time, open it with right-click >
 Open if macOS refuses.
 
+To keep the release build in a folder of your own, for example on a disk with more room, write
+that folder's path on the first line of `~/.config/vireo/install-target-dir`. Every install then
+reuses it and only recompiles what changed. If the folder's disk is not mounted, the script builds
+in `target/` and says so. `CARGO_TARGET_DIR`, when set, takes precedence.
+
 ## Prepared sessions
 
 Each prepared session opens the sources and a new Claude Code conversation with a prompt in the

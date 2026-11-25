@@ -8,6 +8,10 @@
 #
 # The first build takes 30 to 60 minutes. Run nothing else with cargo meanwhile:
 # Vireo's builds use a lot of memory.
+#
+# To keep the release build in a folder of your own (on another disk, say), write that
+# folder's path on the first line of ~/.config/vireo/install-target-dir. Later installs
+# then reuse it and only recompile what changed. CARGO_TARGET_DIR, when set, wins.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -29,7 +33,20 @@ case "$target_triple" in
 esac
 step() { echo "== $(date +%H:%M:%S) $*"; }
 
-step "release channel $ZED_RELEASE_CHANNEL, $target_triple"
+target_dir_file="${XDG_CONFIG_HOME:-$HOME/.config}/vireo/install-target-dir"
+if [[ -z "${CARGO_TARGET_DIR:-}" && -f "$target_dir_file" ]]; then
+  target_dir="$(head -n 1 "$target_dir_file")"
+  target_dir="${target_dir/#\~/$HOME}"
+  # A folder on an unmounted disk would otherwise be created on the internal one,
+  # under /Volumes, and fill it.
+  if [[ -n "$target_dir" && -d "$(dirname "$target_dir")" ]]; then
+    export CARGO_TARGET_DIR="$target_dir"
+  else
+    echo "warning: $target_dir_file names $target_dir, whose parent folder is missing (disk not mounted?); building in ./target" >&2
+  fi
+fi
+
+step "release channel $ZED_RELEASE_CHANNEL, $target_triple, build folder ${CARGO_TARGET_DIR:-$PWD/target}"
 if [ "$(cargo -q bundle --help 2>&1 | head -n 1)" != "cargo-bundle v0.6.1-zed" ]; then
   step "installing cargo-bundle"
   cargo install --target-dir "$tools_target" cargo-bundle --git https://github.com/zed-industries/cargo-bundle.git --branch zed-deploy
