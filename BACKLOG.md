@@ -57,7 +57,30 @@ so far ("Open" lists what the owner may still change before a session starts it)
   icons or other assets are copied or translated line by line. Vireo's panel stays our own
   implementation (README: "No code or assets come from the official extension").
 
-## Done
+### V-14. A project opens with a normal Claude tab, not the side panel
+
+- **Seen on 2026-11-25:** V-4 (`a4a8f41e6c`) shows the Claude panel in the right side bar every
+  time a project opens, even if it was closed last time. The owner: "that is not what I asked, I want
+  a normal Claude Code tab pre-opened, that is all. Now I have a part of the screen locked on a
+  Claude session I cannot close."
+- **Expected:** opening a project folder opens one ordinary Claude tab in the editor area, like any
+  other tab: it can be closed, moved and split. It resumes the project's newest conversation, or
+  starts a new one, with the message box focused. The side bar is left alone.
+- **Code:** `claude_code_ui.rs` `open_on_project_open_from`, called from `zed.rs`
+  `initialize_panels`; `panel.rs` `open` with `Location::PrimaryEditor`.
+- **Decided:** keep the setting `claude_code.open_on_project_open` (true by default). No tab is
+  added when the window already has a Claude tab. The windows whose saved layout still has the
+  Claude panel open in the right side bar (from V-4) get it closed once, the first time the new
+  behaviour runs, so nobody stays stuck with it; after that, the side bar is never touched.
+
+### V-15. Tab still does not accept the suggested prompt
+
+- **Seen on 2026-11-25:** in the app built from `a9b2ba6c1d`, which includes V-1 (`5fa2a27fd9`),
+  Tab on Claude's grey suggested prompt still does not fill the message box. V-1's test passes, so
+  the test does not reproduce what happens in the app.
+- **Expected:** Tab fills the message box with the suggestion, as V-1 describes.
+- **To do:** find what differs between the test and the app (the side panel instead of a tab, the
+  VS Code base keymap, the real `prompt_suggestion` message, where the focus is) and test that.
 
 - V-1, Tab accepts the suggested prompt (the message box's key contexts were never matched, which
   also disabled the "/" list's keys and `use_ctrl_enter_to_send`): `5fa2a27fd9`.
