@@ -92,22 +92,24 @@ impl Pasteboard {
                 }
             }
 
-            // Next, check for a plain string.
+            // Next, a plain string, followed by an image when one comes with it
+            // (a browser's "Copy Image" writes the image and its address).
+            // Readers that want text take the string, which stays first.
             if let Some(string_entry) = self.read_string_from_pasteboard() {
-                return Some(ClipboardItem {
-                    entries: vec![string_entry],
-                });
-            }
-
-            // Finally, try the various supported image types.
-            for format in ImageFormat::iter() {
-                if let Some(item) = self.read_image(format) {
-                    return Some(item);
+                let mut entries = vec![string_entry];
+                if let Some(image) = self.read_first_image() {
+                    entries.extend(image.entries);
                 }
+                return Some(ClipboardItem { entries });
             }
-        }
 
-        None
+            self.read_first_image()
+        }
+    }
+
+    /// The first of the supported image types the pasteboard holds.
+    fn read_first_image(&self) -> Option<ClipboardItem> {
+        ImageFormat::iter().find_map(|format| self.read_image(format))
     }
 
     fn read_image(&self, format: ImageFormat) -> Option<ClipboardItem> {
@@ -361,6 +363,51 @@ mod tests {
         };
         autoreleasepool(|_| pasteboard.write(item.clone()));
         assert_eq!(autoreleasepool(|_| pasteboard.read()), Some(item));
+    }
+
+    #[test]
+    fn test_read_string_and_image() {
+        let pasteboard = Pasteboard::unique();
+        let png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 1, 2, 3];
+        unsafe {
+            pasteboard.inner.clearContents();
+            let text = NSData::with_bytes(b"https://example.com/cat.png");
+            pasteboard
+                .inner
+                .setData_forType(Some(&text), NSPasteboardTypeString);
+            let image = NSData::with_bytes(&png);
+            pasteboard
+                .inner
+                .setData_forType(Some(&image), UTType::png().inner());
+        }
+        let item = pasteboard.read().expect("should read clipboard item");
+        assert_eq!(item.entries.len(), 2);
+        match &item.entries[0] {
+            ClipboardEntry::String(string) => {
+                assert_eq!(string.text(), "https://example.com/cat.png")
+            }
+            other => panic!("expected String, got {:?}", other),
+        }
+        match &item.entries[1] {
+            ClipboardEntry::Image(image) => {
+                assert_eq!(image.format, ImageFormat::Png);
+                assert_eq!(image.bytes, png);
+            }
+            other => panic!("expected Image, got {:?}", other),
+        }
+
+        let image_only = ClipboardItem {
+            entries: vec![ClipboardEntry::Image(Image::from_bytes(
+                ImageFormat::Png,
+                png,
+            ))],
+        };
+        pasteboard.write(image_only);
+        let item = pasteboard.read().expect("should read clipboard item");
+        assert!(matches!(
+            item.entries.as_slice(),
+            [ClipboardEntry::Image(_)]
+        ));
     }
 
     #[test]

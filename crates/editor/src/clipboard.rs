@@ -265,8 +265,14 @@ impl Editor {
             return;
         }
 
+        // An image that comes with text (a browser's "Copy Image" on macOS also
+        // gives its address) pastes the text, as it did before the image was read.
+        let has_string = item
+            .entries()
+            .iter()
+            .any(|entry| matches!(entry, ClipboardEntry::String(_)));
         let clipboard_image = item.entries().iter().find_map(|entry| match entry {
-            ClipboardEntry::Image(image) if !image.bytes.is_empty() => Some(image),
+            ClipboardEntry::Image(image) if !has_string && !image.bytes.is_empty() => Some(image),
             _ => None,
         });
 

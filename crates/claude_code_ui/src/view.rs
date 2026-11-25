@@ -8,8 +8,9 @@ use base64::Engine as _;
 use chrono::{DateTime, Local, Utc};
 use editor::{Editor, EditorEvent, EditorMode, MultiBuffer, MultiBufferOffset, SelectionEffects};
 use gpui::{
-    Action, AnyElement, App, ClipboardEntry, Context, Entity, EventEmitter, FocusHandle, Focusable,
-    KeyContext, ScrollHandle, SharedString, Subscription, Task, WeakEntity, Window, prelude::*, px,
+    Action, AnyElement, App, ClipboardEntry, ClipboardItem, Context, Entity, EventEmitter,
+    ExternalPaths, FocusHandle, Focusable, KeyContext, ScrollHandle, SharedString, Subscription,
+    Task, WeakEntity, Window, prelude::*, px,
 };
 use language::{Buffer, LanguageRegistry};
 use markdown::{Markdown, MarkdownElement, MarkdownFont, MarkdownStyle};
@@ -20,6 +21,7 @@ use ui::{
     CommonAnimationExt as _, ContextMenu, ContextMenuEntry, Divider, HighlightedLabel,
     IconButtonShape, PopoverMenu, Tooltip, prelude::*,
 };
+use util::ResultExt as _;
 use workspace::Workspace;
 
 use crate::conversation::{
@@ -68,6 +70,10 @@ const MAX_OUTPUT_LINES: usize = 40;
 /// see the result without one call filling the panel.
 const PREVIEW_OUTPUT_LINES: usize = 12;
 const MAX_DIFF_LINES: usize = 24;
+/// Pasted or dropped image files up to this size are sent as images, the
+/// limit of an image in a message to Claude; larger ones become mentions.
+const MAX_IMAGE_FILE_BYTES: u64 = 5 * 1024 * 1024;
+const IMAGE_FILE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp"];
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Attachment {
@@ -1319,38 +1325,107 @@ impl ClaudeCodeView {
         }
     }
 
+    /// Runs before the message box's own paste, which would type a copied
+    /// file's name or drop an image.
     fn paste(&mut self, _: &editor::actions::Paste, _: &mut Window, cx: &mut Context<Self>) {
         let Some(item) = cx.read_from_clipboard() else {
-            cx.propagate();
             return;
         };
+        if self.attach_clipboard_item(&item, cx) {
+            cx.stop_propagation();
+        }
+    }
+
+    /// Attaches a pasted item's images as image chips, and its files and
+    /// folders as `@` chips or, for small image files, image chips. Returns
+    /// whether anything is being attached; its text is then dropped.
+    fn attach_clipboard_item(&mut self, item: &ClipboardItem, cx: &mut Context<Self>) -> bool {
         let images: Vec<_> = item
             .entries()
             .iter()
             .filter_map(|entry| match entry {
-                ClipboardEntry::Image(image) => Some(image.clone()),
+                ClipboardEntry::Image(image) if !image.bytes.is_empty() => Some(image.clone()),
                 _ => None,
             })
             .collect();
-        if images.is_empty() {
-            cx.propagate();
-            return;
+        let paths: Vec<PathBuf> = item
+            .entries()
+            .iter()
+            .filter_map(|entry| match entry {
+                ClipboardEntry::ExternalPaths(paths) => Some(paths.paths().to_vec()),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        if images.is_empty() && paths.is_empty() {
+            return false;
         }
-        for (index, image) in images.into_iter().enumerate() {
-            let count = self
-                .attachments
-                .iter()
-                .filter(|attachment| matches!(attachment, Attachment::Image { .. }))
-                .count();
-            self.attachments.push(Attachment::Image {
-                name: format!("Image {}", count + index + 1).into(),
-                image: PromptImage {
-                    media_type: image.format.mime_type().to_string(),
-                    base64: base64::engine::general_purpose::STANDARD.encode(&image.bytes),
-                },
-            });
+        // A bitmap that comes with image files is usually the same image (a
+        // screenshot saved to a temporary file), so the files are then skipped.
+        let skip_image_files = !images.is_empty();
+        let task = cx.background_spawn(async move {
+            let mut pasted: Vec<PastedAttachment> = images
+                .into_iter()
+                .filter_map(|image| {
+                    prompt_image(&image.bytes)
+                        .map(|image| PastedAttachment::Image { name: None, image })
+                })
+                .collect();
+            for path in paths {
+                match load_image_file(&path) {
+                    Some(_) if skip_image_files => {}
+                    Some(image) => pasted.push(PastedAttachment::Image {
+                        name: Some(file_name(&path).into()),
+                        image,
+                    }),
+                    None => pasted.push(PastedAttachment::Mention(path)),
+                }
+            }
+            pasted
+        });
+        cx.spawn(async move |this, cx| {
+            let pasted = task.await;
+            this.update(cx, |this, cx| {
+                for attachment in pasted {
+                    match attachment {
+                        PastedAttachment::Image { name, image } => {
+                            let name = name.unwrap_or_else(|| {
+                                let count = this
+                                    .attachments
+                                    .iter()
+                                    .filter(|attachment| {
+                                        matches!(attachment, Attachment::Image { .. })
+                                    })
+                                    .count();
+                                format!("Image {}", count + 1).into()
+                            });
+                            this.attachments.push(Attachment::Image { name, image });
+                        }
+                        PastedAttachment::Mention(path) => {
+                            this.add_attachment(Attachment::Mention(path), cx)
+                        }
+                    }
+                }
+                cx.notify();
+            })
+        })
+        .detach_and_log_err(cx);
+        true
+    }
+
+    /// Files and folders dropped on the view, or on the tab that holds it.
+    pub fn drop_paths(
+        &mut self,
+        paths: &ExternalPaths,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let item = ClipboardItem {
+            entries: vec![ClipboardEntry::ExternalPaths(paths.clone())],
+        };
+        if self.attach_clipboard_item(&item, cx) {
+            window.focus(&self.input.focus_handle(cx), cx);
         }
-        cx.notify();
     }
 
     fn new_conversation_requested(
@@ -2417,6 +2492,7 @@ impl ClaudeCodeView {
             .child(
                 div()
                     .key_context(key_context)
+                    .capture_action(cx.listener(Self::paste))
                     .px_2()
                     .pt_1p5()
                     .child(self.input.clone()),
@@ -3149,8 +3225,10 @@ impl Render for ClaudeCodeView {
             .on_action(cx.listener(Self::confirm_option))
             .on_action(cx.listener(Self::submit_answers))
             .on_action(cx.listener(Self::dismiss_question))
-            .on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::new_conversation_requested))
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                this.drop_paths(paths, window, cx)
+            }))
             .child(self.render_header(cx))
             .child(
                 div()
@@ -3713,6 +3791,53 @@ pub fn strip_context_preamble(text: &str) -> &str {
         (Some(_), Some(end)) => &text[end + CONTEXT_CLOSE.len()..],
         _ => text,
     }
+}
+
+enum PastedAttachment {
+    /// Named "Image N" when it has no file name.
+    Image {
+        name: Option<SharedString>,
+        image: PromptImage,
+    },
+    Mention(PathBuf),
+}
+
+/// An image Claude accepts, as it is when PNG, JPEG, GIF or WebP, otherwise
+/// converted to PNG (a TIFF from the macOS clipboard, for example).
+fn prompt_image(bytes: &[u8]) -> Option<PromptImage> {
+    let encode = |media_type: &str, bytes: &[u8]| PromptImage {
+        media_type: media_type.to_string(),
+        base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+    };
+    match image::guess_format(bytes).ok()? {
+        image::ImageFormat::Png => Some(encode("image/png", bytes)),
+        image::ImageFormat::Jpeg => Some(encode("image/jpeg", bytes)),
+        image::ImageFormat::Gif => Some(encode("image/gif", bytes)),
+        image::ImageFormat::WebP => Some(encode("image/webp", bytes)),
+        _ => {
+            let decoded = image::load_from_memory(bytes).log_err()?;
+            let mut png = std::io::Cursor::new(Vec::new());
+            decoded
+                .write_to(&mut png, image::ImageFormat::Png)
+                .log_err()?;
+            Some(encode("image/png", &png.into_inner()))
+        }
+    }
+}
+
+/// A pasted or dropped file sent as an image: a PNG, JPEG, GIF or WebP file
+/// of at most `MAX_IMAGE_FILE_BYTES`.
+fn load_image_file(path: &Path) -> Option<PromptImage> {
+    let extension = path.extension()?.to_str()?.to_ascii_lowercase();
+    if !IMAGE_FILE_EXTENSIONS.contains(&extension.as_str()) {
+        return None;
+    }
+    let metadata = std::fs::metadata(path).ok()?;
+    if !metadata.is_file() || metadata.len() > MAX_IMAGE_FILE_BYTES {
+        return None;
+    }
+    let bytes = std::fs::read(path).log_err()?;
+    prompt_image(&bytes)
 }
 
 #[cfg(test)]
@@ -4634,6 +4759,129 @@ mod tests {
                 view.last_decision,
                 Some(serde_json::json!({"behavior": "allow", "updatedInput": expected}))
             );
+        });
+    }
+
+    fn png_bytes() -> Vec<u8> {
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::new_rgb8(1, 1)
+            .write_to(&mut png, image::ImageFormat::Png)
+            .expect("encode png");
+        png.into_inner()
+    }
+
+    fn attachment_kinds(view: &ClaudeCodeView) -> Vec<String> {
+        view.attachments
+            .iter()
+            .map(|attachment| match attachment {
+                Attachment::Mention(path) => format!("@{}", path.display()),
+                Attachment::Selection { path, .. } => format!("#{}", path.display()),
+                Attachment::Image { name, image } => format!("image {name} {}", image.media_type),
+            })
+            .collect()
+    }
+
+    /// V-22: a file copied in Finder comes as its path and its name as text.
+    /// The message box attaches the file and does not type its name.
+    #[gpui::test]
+    async fn pasting_a_copied_file_attaches_it(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        let path = PathBuf::from(path!("/project/notes.txt"));
+        cx.write_to_clipboard(ClipboardItem {
+            entries: vec![
+                ClipboardEntry::ExternalPaths(gpui::ExternalPaths(vec![path.clone()].into())),
+                ClipboardEntry::String(gpui::ClipboardString::new("notes.txt".into())),
+            ],
+        });
+        cx.simulate_keystrokes("cmd-v");
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "");
+            assert_eq!(view.attachments, vec![Attachment::Mention(path.clone())]);
+        });
+    }
+
+    /// V-22: a screenshot copied to the clipboard, and a browser's "Copy
+    /// Image", which also carries text: both become one image chip.
+    #[gpui::test]
+    async fn pasting_an_image_attaches_it(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        cx.write_to_clipboard(ClipboardItem {
+            entries: vec![ClipboardEntry::Image(gpui::Image::from_bytes(
+                gpui::ImageFormat::Png,
+                png_bytes(),
+            ))],
+        });
+        cx.simulate_keystrokes("cmd-v");
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "");
+            assert_eq!(attachment_kinds(view), vec!["image Image 1 image/png"]);
+        });
+
+        cx.write_to_clipboard(ClipboardItem {
+            entries: vec![
+                ClipboardEntry::String(gpui::ClipboardString::new(
+                    "https://example.com/cat.png".into(),
+                )),
+                ClipboardEntry::Image(gpui::Image::from_bytes(gpui::ImageFormat::Png, png_bytes())),
+            ],
+        });
+        cx.simulate_keystrokes("cmd-v");
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "");
+            assert_eq!(
+                attachment_kinds(view),
+                vec!["image Image 1 image/png", "image Image 2 image/png"]
+            );
+        });
+    }
+
+    /// V-22: a copied image file small enough is sent as an image; text pastes
+    /// as before, with no chip.
+    #[gpui::test]
+    async fn pasting_an_image_file_or_text(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let image_path = directory.path().join("cat.png");
+        std::fs::write(&image_path, png_bytes()).expect("write the image");
+        cx.write_to_clipboard(ClipboardItem {
+            entries: vec![ClipboardEntry::ExternalPaths(gpui::ExternalPaths(
+                vec![image_path].into(),
+            ))],
+        });
+        cx.simulate_keystrokes("cmd-v");
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "");
+            assert_eq!(attachment_kinds(view), vec!["image cat.png image/png"]);
+        });
+
+        cx.write_to_clipboard(ClipboardItem::new_string("plain words".into()));
+        cx.simulate_keystrokes("cmd-v");
+        cx.run_until_parked();
+        view.read_with(cx, |view, cx| {
+            assert_eq!(view.input.read(cx).text(cx), "plain words");
+            assert_eq!(view.attachments.len(), 1);
+        });
+    }
+
+    /// V-22: files dropped on a Claude tab are attached, not opened in its pane.
+    #[gpui::test]
+    async fn dropping_files_on_the_tab_attaches_them(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = view_in_tab(cx, Vec::new()).await;
+        let path = PathBuf::from(path!("/project/src"));
+        let position = gpui::point(gpui::px(200.), gpui::px(200.));
+        cx.simulate_event(gpui::FileDropEvent::Entered {
+            position,
+            paths: gpui::ExternalPaths(vec![path.clone()].into()),
+        });
+        cx.simulate_event(gpui::FileDropEvent::Pending { position });
+        cx.simulate_event(gpui::FileDropEvent::Submit { position });
+        cx.run_until_parked();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.attachments, vec![Attachment::Mention(path.clone())]);
         });
     }
 }

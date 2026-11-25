@@ -449,6 +449,23 @@ impl Render for ClaudeCodeTab {
 impl Item for ClaudeCodeTab {
     type Event = TabEvent;
 
+    /// Files dropped on the tab's pane are attached to the message rather
+    /// than opened in the pane.
+    fn handle_drop(
+        &self,
+        _: &workspace::Pane,
+        dropped: &dyn std::any::Any,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> bool {
+        let Some(paths) = dropped.downcast_ref::<gpui::ExternalPaths>() else {
+            return false;
+        };
+        self.view
+            .update(cx, |view, cx| view.drop_paths(paths, window, cx));
+        true
+    }
+
     fn tab_extra_context_menu_actions(
         &self,
         _: &mut Window,
