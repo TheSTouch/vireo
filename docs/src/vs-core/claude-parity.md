@@ -2,7 +2,7 @@
 
 Vireo's Claude Code panel is a native GPUI implementation (crates `claude_code_ui` and
 `claude_ide`) that aims at the same features as the official Claude Code extension for VS Code,
-version **2.1.328**. The extension is proprietary. It was used only as a reference: features were
+version **2.1.331**. The extension is proprietary. It was used only as a reference: features were
 inventoried from its `package.json`, by watching it run, and from Anthropic's public
 documentation. No code, styles, fonts, images or logos were taken from it.
 
@@ -78,8 +78,8 @@ Terminal" used only by the keybinding, and `claude-vscode.toggleDictation`, the 
 | `cmd-d` / `ctrl-d` | Toggle dictation | Claude input focused | `claude_code::ToggleDictation` in `ClaudeCode` and the Claude input | B-7, B-8 | Partial: the key works; dictation itself is not built (see Voice input) |
 | `enter` / `cmd-enter` | Send (depends on `useCtrlEnterToSend`) | Claude input focused | Input key handling | B-4, Panel A-V1 | Done: `use_ctrl_enter_to_send` takes effect since Panel A-V1 fixed the message box's key contexts |
 | `tab` | Accept the suggested prompt | Empty Claude input showing a suggestion | `claude_code::AcceptSuggestion` in `ClaudeCodeInput && has_suggestion > Editor` | Panel A-V1 | Done |
-| `up`, `down`, `enter`, number keys | Pick an option of a permission prompt or a question | The card is focused | `claude_code::SelectPreviousOption`, `SelectNextOption`, `ConfirmOption` in `ClaudeCodePermission` and `ClaudeCodeQuestion`; `cmd-enter` / `ctrl-enter` `SubmitAnswers` and `escape` `DismissQuestion` in `ClaudeCodeQuestion` | Panel A-V7, A-V11 | Done |
-| `escape` | Stop the running turn | Claude focused while running | `claude_code::Interrupt` | B-4 | Done |
+| `up`, `down`, `enter`, number keys | Pick an option of a permission prompt or a question | The card is focused | `claude_code::SelectPreviousOption`, `SelectNextOption`, `ConfirmOption` in `ClaudeCodePermission` and `ClaudeCodeQuestion`; `cmd-enter` / `ctrl-enter` `SubmitAnswers` and `escape` `DismissQuestion` in `ClaudeCodeQuestion`; `escape` `DenyPermission` in `ClaudeCodePermission` | Panel A-V7, A-V11, Ext331 A-3 | Done |
+| `escape` | Stop the running turn | Claude focused while running, `escapeStopsClaude` on. A single press, unless a menu, a dialog or a permission card takes it first. Two presses within 800 ms in an empty message box open the rewind picker instead | `claude_code::Interrupt` in `ClaudeCode && escape_stops_claude` and `ClaudeCodeInput && escape_stops_claude > Editor`; the Stop button whatever the setting | B-4, Ext331 A-3 | Partial: stopping matches the extension; the rewind picker is not built |
 
 ## Settings
 
@@ -112,10 +112,10 @@ The extension's settings live under `claudeCode.*`; Vireo's live under `claude_c
 | `spinnerVerbs` | `{mode: append or replace, verbs: []}` | Verbs shown while Claude works. | `spinner_verbs` | B-4 | Done |
 | `archiveInactiveSessions` | number (0, 1, 2, 7, 14), `14` | Archive sessions idle this many days; 0 disables. | `archive_inactive_sessions` | B-6 | Done: applied when the sessions list opens; open sessions are never archived |
 | `usePythonEnvironment` | bool, `true` | Activate the workspace's Python environment for Claude. | `use_python_environment` | B-2 | Done |
-| `escapeStopsClaude` | bool, `true` | Escape in the Claude panel stops Claude while it works; when off, only the Stop button does. Escape still closes menus and dialogs and declines permission requests and questions. Added in 2.1.331. | `escape_stops_claude` | V-16 | Todo: Escape always stops a running turn |
-| `pinPrompt` | bool, `true` | Your message stays pinned at the top of the conversation while you scroll through Claude's reply to it; when off, it scrolls away. Added in 2.1.331. | `pin_prompt` | V-17 | Todo: the message scrolls away |
-| `contextUsageThreshold` | number 0 to 100, `50` | The context usage indicator shows below the message box once more than this percentage of the context window is used; 0 shows it from the first reply. Added in 2.1.331. | `context_usage_threshold` | V-18 | Todo: context tokens only in a tooltip |
-| `showFixActions` | bool, `true` | Shows "Fix with Claude Code" where the editor reports something to fix (failed test messages). Added in 2.1.331. | `show_fix_actions` | V-19 | Todo |
+| `escapeStopsClaude` | bool, `true` | Escape in the Claude panel stops Claude while it works; when off, only the Stop button does. Escape still closes menus and dialogs and declines permission requests and questions. Added in 2.1.331. | `escape_stops_claude` | V-16 | Done (Ext331 A-3): when off, Escape does not stop Claude; the Stop button does, and Escape still closes the "/" list, dismisses questions and declines permission requests |
+| `pinPrompt` | bool, `true` | Your message stays pinned at the top of the conversation while you scroll through Claude's reply to it; when off, it scrolls away. Added in 2.1.331. | `pin_prompt` | V-17 | Done (Ext331 A-4): a copy of the message, at most 3 lines, is drawn pinned at the top of the list while its reply is read; clicking it scrolls to the message. The extension makes the message itself sticky |
+| `contextUsageThreshold` | number 0 to 100, `50` | The context usage indicator shows below the message box once more than this percentage of the context window is used; 0 shows it from the first reply. Added in 2.1.331. | `context_usage_threshold` | V-18 | Done (Ext331 A-5): a ring left of the usage label shows the share of the window used; its tooltip gives the share left before auto-compact, and clicking it sends /compact. Hidden until a result has given the window's size |
+| `showFixActions` | bool, `true` | Shows "Fix with Claude Code" where the editor reports something to fix (failed test messages). Added in 2.1.331. | `show_fix_actions` | V-19 | Partial: the setting exists (Ext331 A-1); nothing shows the action yet |
 
 Vireo's own settings, with no extension counterpart:
 
@@ -161,15 +161,15 @@ Observed in the running extension, version 2.1.328.
 | Slash commands | "/" button and typing "/" open a menu of commands from the CLI's `slash_commands` list and local actions: clear conversation, new conversation, focus view, account and usage, switch model, and so on. | B-4, Panel A-V1 | Done (the list's keys work since Panel A-V1 fixed their key context): typing "/" at the start of the message, or the / button, opens a list above the message box that filters as you type and scrolls; Up and Down move, Enter or Tab inserts a command (or runs a local action), Escape closes it |
 | @-mentions | Typing "@" opens a fuzzy file and folder picker ("Mention file from this project…"); folders end in "/". `@terminal:name` references a terminal. | B-4, Polish A-1 | Partial: typing "@" at the start of the message or after a space opens a list above the message box with the project's files and folders (folders end in "/"), fuzzy-matched on what follows the "@", at most 50, honouring `respect_git_ignore`; Up and Down move, Enter or Tab inserts `@path `, Escape closes it. An "@" inside a word (an email address) does not open it. "Mention file from this project…" still opens the picker. `@terminal:` is not offered |
 | Attach button (+) | Menu: "Upload from computer" / "Attach file…", "Add context", "Mention file from this project…". | B-4 | Done |
-| Image paste | Pasting or dropping an image adds an image chip; it is sent as a base64 image block. | B-4 | Done |
+| Image paste | Pasting or dropping an image adds an image chip; it is sent as a base64 image block. | B-4, Ext331 A-2 | Done since Ext331 A-2 (before it, the message box's own paste ran first and dropping did nothing): a pasted image (a screenshot, a browser's "Copy Image") becomes an image chip, and the text that comes with it is dropped; images other than PNG, JPEG, GIF and WebP are converted to PNG. A copied or dropped file or folder becomes an `@` chip, or an image chip for a PNG, JPEG, GIF or WebP file of at most 5 MB. Dropping works on the panel and on a Claude tab |
 | Attachment chips | Chips above the text for the open file, the selection (`file#5-10`), images and mentions; each removable. | B-4 | Done |
 | Prompt suggestions | After a reply, the empty input shows a suggested next prompt in italics; Tab accepts it. | B-4, Panel A-V1 | Done: Tab fills the message box with the suggestion, cursor at the end (it inserted a tab until Panel A-V1) |
 | Timestamps | Time at the right of each message; a date line when the day changes. | B-4 | Done |
 | Status banner | Banner above the input, e.g. "Browser connected", dismissible. | B-4 | Done |
-| Usage display | Clock icon with time until the session limit resets ("59m"); "Account & usage" shows session and weekly limits. Context usage per conversation. | B-4 | Partial: time to the rate-limit reset, context tokens and cost in a tooltip; no Account & usage view |
+| Usage display | Clock icon with time until the session limit resets ("59m"); "Account & usage" shows session and weekly limits. Context usage per conversation. | B-4, Ext331 A-5 | Partial: time to the rate-limit reset, context tokens and cost in a tooltip, and the context usage ring (`context_usage_threshold`); no Account & usage view |
 | Spinner | While working: a verb from the spinner list, or "Running <tool>…". | B-4 | Done |
 | Queued messages | A message sent while Claude works is queued ("Message queued."). | B-4 | Done |
-| Stop | Stop button and Escape interrupt the turn. | B-4 | Done |
+| Stop | Stop button and Escape interrupt the turn; Escape only while `escapeStopsClaude` is on. | B-4, Ext331 A-3 | Done |
 | Focus view | Hides tool calls and thinking; a live indicator names the running tool. | B-4 | Done |
 | Rewind and fork | Hover a user message: "Fork conversation from here", "Rewind code to here", "Fork conversation and rewind code". | B-6 | Done: hover buttons on each prompt; a fork opens in a new tab with `--resume --fork-session --resume-session-at` and the prompt back in the input; rewinding uses the `rewind_files` control request |
 | Copy and bookmark | "Copy response" and "Bookmark response" under each reply; a bookmarks list in the header. | B-4 | Todo: replies can be selected and copied, and your own messages have a copy button (Panel A-V10), but there is no "Copy response" button or bookmarks |

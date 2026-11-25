@@ -47,34 +47,6 @@ so far ("Open" lists what the owner may still change before a session starts it)
 - **Left:** the views, cards, menus and buttons of the running extension and its webview code, each
   compared with Vireo's; screenshots of both (screen capture is not allowed on this machine).
 
-### V-16. Setting: Escape stops Claude (`escapeStopsClaude`)
-
-- **Extension (2.1.331):** `claudeCode.escapeStopsClaude`, true by default. Escape in the Claude
-  panel stops Claude while it works; when off, only the Stop button does. Escape still closes menus
-  and dialogs and declines permission requests and questions.
-- **Vireo today:** Escape always runs `claude_code::Interrupt` (keymaps, contexts `ClaudeCode` and
-  `ClaudeCodeInput > Editor`).
-- **Expected:** `claude_code.escape_stops_claude`, true by default; when false, Escape does not
-  interrupt, and keeps its other uses.
-
-### V-17. Setting: pin your message while reading the reply (`pinPrompt`)
-
-- **Extension (2.1.331):** `claudeCode.pinPrompt`, true by default. Your message stays pinned at the
-  top of the conversation while you scroll through Claude's reply to it; when off, it scrolls away.
-- **Vireo today:** the message scrolls away with the conversation (`view.rs`, the message list).
-- **Expected:** `claude_code.pin_prompt`, true by default: while a reply is on screen, the user
-  message it answers sticks to the top of the list.
-
-### V-18. The context usage indicator below the message box (`contextUsageThreshold`)
-
-- **Extension (2.1.331):** `claudeCode.contextUsageThreshold`, a number from 0 to 100, 50 by
-  default. The context usage indicator shows below the message box once more than this percentage
-  of the context window is used; 0 shows it from the first reply.
-- **Vireo today:** context tokens and cost appear only in a tooltip.
-- **Expected:** an indicator below the message box (the share of the context window used), shown
-  above the threshold, and the setting `claude_code.context_usage_threshold`. Look at the
-  extension's indicator (what it shows, what clicking it does) before building it.
-
 ### V-19. "Fix with Claude Code" on failed tests (`fixTestFailure`, `showFixActions`)
 
 - **Extension (2.1.331):** the command `claude-vscode.fixTestFailure` ("Fix with Claude Code") on a
@@ -84,6 +56,8 @@ so far ("Open" lists what the owner may still change before a session starts it)
   for the action has to be chosen.
 - **Open:** where it goes (a failed task's output, diagnostics' code actions); the setting's text,
   "where the editor reports something to fix", may also cover diagnostics.
+- **Ext331 (2026-11-25):** the setting `claude_code.show_fix_actions` exists (A-1, `209045e67b`);
+  nothing reads it yet. Session B of the batch, which owned V-19 to V-21, did not land anything.
 
 ### V-20. Resolve merge conflicts with Claude (`resolveMergeConflicts`)
 
@@ -103,19 +77,6 @@ so far ("Open" lists what the owner may still change before a session starts it)
 - **Expected:** the same entry on a cell in Vireo's notebook view, adding the cell to the message
   box.
 
-
-### V-22. Pasting an image or a file in the message box inserts its name
-
-- **Seen on 2026-11-25:** the owner: "I can't paste images or files in the Claude prompt input, it
-  just puts the name and not the file."
-- **Cause:** `ClaudeCodeView::paste` (`view.rs` ~1322) listens for `editor::Paste` on the view's
-  root, so the message box's editor runs Paste first (`editor/src/clipboard.rs` ~252) and never
-  passes it on: images and files copied in Finder never reach Vireo's handler. Also, macOS's
-  clipboard reader (`gpui_macos/src/pasteboard.rs` ~59, `read`) returns the text alone when an image
-  comes with a text flavour (a browser's "Copy Image"). Dropping files on the panel is not handled
-  either, though `claude-parity.md` says "pasting or dropping an image" works.
-- **Expected:** a pasted or dropped image becomes an image chip, a pasted or dropped file or folder
-  an `@` chip; text pastes as before.
 
 ## Done
 
@@ -143,5 +104,15 @@ so far ("Open" lists what the owner may still change before a session starts it)
   is closed once per folder): `e4875fee3d`.
 - V-15, Tab on the suggestion: not a bug (the owner found it works). A test now runs it the way the
   app does, and with suggestions off Tab no longer pastes the hidden one: `b8e7c6377b`.
+- V-16, the setting `escape_stops_claude` (Ext331 A-3): `c54fe421a3`. The extension stops Claude on
+  a single Escape, as Vireo did, so only the setting was missing; Escape on a permission card now
+  declines it. Left: the extension's rewind picker (two Escapes within 800 ms in an empty message
+  box), which Vireo does not have.
+- V-17, the setting `pin_prompt`: the message a reply answers stays pinned at the top of the list
+  (Ext331 A-4): `4469c2b079`. Vireo draws a copy of the message (at most 3 lines) where the extension
+  makes the message itself sticky.
+- V-18, the context usage ring and the setting `context_usage_threshold`; clicking the ring sends
+  /compact (Ext331 A-5): `2c5d074175`.
+- V-22, pasting and dropping images and files in the message box (Ext331 A-2): `c7258891aa`.
 - `@` opens a file and folder list in the message box: `ac2410e811`.
 - The extension uninstall test, and the race it revealed in the extension store: `ff07243366`.
