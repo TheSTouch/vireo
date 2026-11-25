@@ -1,6 +1,6 @@
 use settings::{
-    ClaudeCodeOpensIn, ClaudeCodePermissionMode, ClaudeCodePreferredLocation, ClaudeCodeSpinnerVerbs,
-    ClaudeCodeSpinnerVerbsMode, RegisterSetting, Settings, SettingsContent,
+    ClaudeCodeOpensIn, ClaudeCodePermissionMode, ClaudeCodePreferredLocation,
+    ClaudeCodeSpinnerVerbs, ClaudeCodeSpinnerVerbsMode, RegisterSetting, Settings, SettingsContent,
 };
 
 use crate::protocol::PermissionMode;
@@ -34,6 +34,7 @@ pub struct ClaudeCodeSettings {
     pub spinner_verbs: ClaudeCodeSpinnerVerbs,
     pub archive_inactive_sessions: u32,
     pub use_python_environment: bool,
+    pub show_fix_actions: bool,
 }
 
 impl Settings for ClaudeCodeSettings {
@@ -88,6 +89,7 @@ impl Settings for ClaudeCodeSettings {
             spinner_verbs: claude.spinner_verbs.unwrap_or_default(),
             archive_inactive_sessions: claude.archive_inactive_sessions.unwrap_or(14),
             use_python_environment: claude.use_python_environment.unwrap_or(true),
+            show_fix_actions: claude.show_fix_actions.unwrap_or(true),
         }
     }
 }
@@ -140,6 +142,7 @@ mod tests {
             assert!(settings.attach_selection);
             assert!(settings.continue_after_reload);
             assert!(settings.open_on_project_open);
+            assert!(settings.show_fix_actions);
             assert!(settings.enable_reopen_closed_session_shortcut);
             assert!(!settings.enable_new_conversation_shortcut);
             assert!(!settings.use_ctrl_enter_to_send);

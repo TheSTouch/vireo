@@ -2140,6 +2140,8 @@
     "archive_inactive_sessions": 14,
     // Activate the workspace's Python virtual environment for Claude.
     "use_python_environment": true,
+    // Show "Fix with Claude Code" where the editor reports something to fix.
+    "show_fix_actions": true,
   },
   // Settings specific to journaling
   "journal": {

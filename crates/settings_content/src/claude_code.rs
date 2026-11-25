@@ -126,6 +126,10 @@ pub struct ClaudeCodeSettingsContent {
     ///
     /// Default: true
     pub use_python_environment: Option<bool>,
+    /// Show "Fix with Claude Code" where the editor reports something to fix.
+    ///
+    /// Default: true
+    pub show_fix_actions: Option<bool>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, MergeFrom)]

@@ -318,6 +318,7 @@ impl VsCodeSettings {
             spinner_verbs,
             archive_inactive_sessions: self.read_u32("claudeCode.archiveInactiveSessions"),
             use_python_environment: self.read_bool("claudeCode.usePythonEnvironment"),
+            show_fix_actions: self.read_bool("claudeCode.showFixActions"),
         })
     }
 
@@ -1346,7 +1347,8 @@ mod tests {
                 "claudeCode.preferredLocation": "sidebar",
                 "claudeCode.archiveInactiveSessions": 7,
                 "claudeCode.environmentVariables": [{"name": "FOO", "value": "bar"}],
-                "claudeCode.spinnerVerbs": {"mode": "replace", "verbs": ["Brewing"]}
+                "claudeCode.spinnerVerbs": {"mode": "replace", "verbs": ["Brewing"]},
+                "claudeCode.showFixActions": false
             }"#,
             VsCodeSettingsSource::VsCode,
         )?;
@@ -1364,6 +1366,7 @@ mod tests {
             Some(ClaudeCodePreferredLocation::Sidebar)
         );
         assert_eq!(claude.archive_inactive_sessions, Some(7));
+        assert_eq!(claude.show_fix_actions, Some(false));
         assert_eq!(
             claude.environment_variables,
             Some(vec![ClaudeCodeEnvironmentVariable {
